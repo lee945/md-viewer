@@ -1,0 +1,251 @@
+:root {
+  color-scheme: light;
+  --bg: #ffffff;
+  --bg-elevated: #f6f7f9;
+  --bg-hover: #eaeef2;
+  --text: #1f2328;
+  --text-muted: #59636e;
+  --border: #d1d9e0;
+  --accent: #0969da;
+  --accent-text: #ffffff;
+  --code-bg: #f6f8fa;
+  --shadow: 0 8px 24px rgba(31, 35, 40, 0.12);
+}
+
+[data-theme='dark'] {
+  color-scheme: dark;
+  --bg: #0d1117;
+  --bg-elevated: #161b22;
+  --bg-hover: #21262d;
+  --text: #e6edf3;
+  --text-muted: #9198a1;
+  --border: #30363d;
+  --accent: #4493f8;
+  --accent-text: #0d1117;
+  --code-bg: #161b22;
+  --shadow: 0 8px 24px rgba(1, 4, 9, 0.6);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  overflow: hidden;
+  font-family: 'Segoe UI', 'Microsoft YaHei', 'PingFang SC', 'Noto Sans SC', system-ui, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+}
+
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex: none;
+  height: 48px;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-elevated);
+  -webkit-app-region: drag;
+}
+
+.toolbar-title {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  min-width: 0;
+}
+
+.app-name {
+  font-weight: 600;
+}
+
+.file-name {
+  color: var(--text-muted);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.toolbar-actions {
+  display: flex;
+  gap: 8px;
+  -webkit-app-region: no-drag;
+}
+
+.toolbar button,
+.toast-error button {
+  appearance: none;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  border-radius: 6px;
+  padding: 5px 12px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.toolbar button:hover {
+  background: var(--bg-hover);
+}
+
+.app-body {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
+
+.outline {
+  width: 240px;
+  flex: none;
+  overflow-y: auto;
+  padding: 12px 8px;
+  border-right: 1px solid var(--border);
+  background: var(--bg);
+}
+
+.outline-header {
+  padding: 4px 10px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+}
+
+.outline-empty {
+  padding: 0 10px;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.outline nav {
+  display: flex;
+  flex-direction: column;
+}
+
+.outline-item {
+  appearance: none;
+  border: 0;
+  background: none;
+  color: var(--text-muted);
+  text-align: left;
+  font-size: 13px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.outline-item:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.outline-item.active {
+  color: var(--accent);
+  background: var(--bg-hover);
+  font-weight: 600;
+}
+
+.outline-item.level-1 {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.outline-item.level-2 { padding-left: 22px; }
+.outline-item.level-3 { padding-left: 34px; }
+.outline-item.level-4 { padding-left: 46px; }
+.outline-item.level-5 { padding-left: 58px; }
+.outline-item.level-6 { padding-left: 70px; }
+
+.content {
+  position: relative;
+  flex: 1;
+  overflow-y: auto;
+}
+
+.welcome {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 40px;
+  text-align: center;
+}
+
+.welcome h1 {
+  margin: 0;
+  font-size: 28px;
+}
+
+.welcome p {
+  margin: 0;
+  color: var(--text-muted);
+}
+
+.welcome-open {
+  margin-top: 12px;
+  padding: 10px 28px;
+  font-size: 15px;
+  border-radius: 8px;
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: var(--accent-text);
+  cursor: pointer;
+}
+
+.welcome-open:hover {
+  filter: brightness(1.1);
+}
+
+.welcome-hints {
+  display: grid;
+  gap: 6px;
+  margin: 20px 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.toast-error {
+  position: fixed;
+  left: 50%;
+  bottom: 24px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: 80vw;
+  padding: 10px 16px;
+  border-radius: 8px;
+  background: #d1242f;
+  color: #ffffff;
+  box-shadow: var(--shadow);
+  font-size: 13px;
+}
+
+.toast-error button {
+  background: transparent;
+  border-color: rgba(255, 255, 255, 0.5);
+  color: #ffffff;
+}
