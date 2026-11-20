@@ -1,6 +1,6 @@
 import { useEffect } from 'react'
 import Toolbar from './components/Toolbar'
-import Outline from './components/Outline'
+import Sidebar from './components/Sidebar'
 import Preview from './components/Preview'
 import Welcome from './components/Welcome'
 import { useAppStore } from './stores/app.store'
@@ -70,7 +70,7 @@ export default function App() {
       <div className="app-body">
         {file ? (
           <>
-            <Outline />
+            <Sidebar />
             <Preview />
           </>
         ) : (

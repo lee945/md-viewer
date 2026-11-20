@@ -5,5 +5,6 @@ export const IPC = {
   openFileFromMain: 'app:open-file',
   menuOpenFile: 'menu:open-file',
   setTheme: 'window:set-theme',
-  openExternal: 'shell:open-external'
+  openExternal: 'shell:open-external',
+  listDir: 'fs:list-dir'
 } as const

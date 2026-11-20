@@ -7,6 +7,8 @@ export interface OutlineItem {
   text: string
 }
 
+export type SidebarTab = 'outline' | 'files'
+
 interface AppState {
   file: FileInfo | null
   loading: boolean
@@ -14,21 +16,28 @@ interface AppState {
   theme: ColorScheme
   outline: OutlineItem[]
   activeId: string | null
+  sidebarTab: SidebarTab
   openDialog(): Promise<void>
   openPath(path: string): Promise<void>
   toggleTheme(): void
   setTheme(theme: ColorScheme): void
   setOutline(outline: OutlineItem[]): void
   setActiveId(id: string | null): void
+  setSidebarTab(tab: SidebarTab): void
   clearError(): void
 }
 
 const THEME_KEY = 'mdv.theme'
+const SIDEBAR_TAB_KEY = 'mdv.sidebarTab'
 
 function initialTheme(): ColorScheme {
   const saved = localStorage.getItem(THEME_KEY)
   if (saved === 'light' || saved === 'dark') return saved
   return window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+}
+
+function initialSidebarTab(): SidebarTab {
+  return localStorage.getItem(SIDEBAR_TAB_KEY) === 'files' ? 'files' : 'outline'
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -38,6 +47,7 @@ export const useAppStore = create<AppState>((set) => ({
   theme: initialTheme(),
   outline: [],
   activeId: null,
+  sidebarTab: initialSidebarTab(),
 
   async openDialog() {
     set({ loading: true, error: null })
@@ -82,6 +92,11 @@ export const useAppStore = create<AppState>((set) => ({
 
   setActiveId(id) {
     set({ activeId: id })
+  },
+
+  setSidebarTab(tab) {
+    localStorage.setItem(SIDEBAR_TAB_KEY, tab)
+    set({ sidebarTab: tab })
   },
 
   clearError() {

@@ -12,6 +12,12 @@ export interface FileInfo {
 
 export type IpcResult<T> = { ok: true; data: T } | { ok: false; error: string }
 
+export interface DirEntry {
+  name: string
+  path: string
+  isDir: boolean
+}
+
 export interface DesktopAPI {
   openFileDialog(): Promise<IpcResult<FileInfo | null>>
   openPath(path: string): Promise<IpcResult<FileInfo>>
@@ -21,4 +27,5 @@ export interface DesktopAPI {
   onMenuOpenFile(cb: () => void): () => void
   setThemeSource(theme: ColorScheme): void
   openExternal(url: string): void
+  listDir(path: string): Promise<IpcResult<DirEntry[]>>
 }

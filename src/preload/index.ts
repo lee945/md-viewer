@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import { IPC } from '../shared/ipc'
-import type { ColorScheme, DesktopAPI, FileInfo, IpcResult } from '../shared/types'
+import type { ColorScheme, DesktopAPI, DirEntry, FileInfo, IpcResult } from '../shared/types'
 
 function subscribe(channel: string, cb: (payload: string) => void): () => void {
   const listener = (_event: Electron.IpcRendererEvent, payload: string): void => cb(payload)
@@ -28,7 +28,8 @@ const api: DesktopAPI = {
   },
   openExternal: (url: string) => {
     ipcRenderer.send(IPC.openExternal, url)
-  }
+  },
+  listDir: (dirPath: string) => ipcRenderer.invoke(IPC.listDir, dirPath) as Promise<IpcResult<DirEntry[]>>
 }
 
 contextBridge.exposeInMainWorld('api', api)

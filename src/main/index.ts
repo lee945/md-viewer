@@ -5,6 +5,7 @@ import type { ColorScheme, FileInfo, IpcResult } from '../shared/types'
 import { buildMenu } from './menu'
 import { registerAssetProtocol, setAssetRoot } from './services/assets'
 import { findMarkdownArg } from './services/argv'
+import { listDirectory } from './services/dir'
 import { readMarkdownFile } from './services/text'
 
 protocol.registerSchemesAsPrivileged([
@@ -18,6 +19,7 @@ let mainWindow: BrowserWindow | null = null
 let startupFile: string | null = null
 let rendererReady = false
 let pendingPath: string | null = null
+let workspaceRoot: string | null = null
 
 const isDev = Boolean(process.env['ELECTRON_RENDERER_URL'])
 
@@ -34,7 +36,8 @@ function isTrusted(event: Electron.IpcMainInvokeEvent): boolean {
 async function openFileByPath(filePath: string): Promise<IpcResult<FileInfo>> {
   try {
     const info = await readMarkdownFile(filePath)
-    setAssetRoot(path.dirname(info.path))
+    workspaceRoot = path.dirname(info.path)
+    setAssetRoot(workspaceRoot)
     mainWindow?.setTitle(`${path.basename(info.path)} — MD Viewer`)
     return { ok: true, data: info }
   } catch (err) {
@@ -135,6 +138,19 @@ function registerIpc(): void {
     const file = startupFile
     startupFile = null
     return file
+  })
+
+  ipcMain.handle(IPC.listDir, async (event, dirPath: unknown) => {
+    if (!isTrusted(event)) return { ok: false, error: '未授权的调用来源' }
+    if (typeof dirPath !== 'string' || dirPath.length === 0) {
+      return { ok: false, error: '无效的目录路径' }
+    }
+    if (!workspaceRoot) return { ok: false, error: '尚未打开文档' }
+    try {
+      return { ok: true, data: await listDirectory(workspaceRoot, dirPath) }
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) }
+    }
   })
 
   ipcMain.on(IPC.setTheme, (_event, theme: ColorScheme) => {
