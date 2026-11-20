@@ -19,6 +19,8 @@ let startupFile: string | null = null
 let rendererReady = false
 let pendingPath: string | null = null
 
+const isDev = Boolean(process.env['ELECTRON_RENDERER_URL'])
+
 function isAppUrl(url: string): boolean {
   const devUrl = process.env['ELECTRON_RENDERER_URL']
   if (devUrl) return url.startsWith(devUrl)
@@ -72,7 +74,8 @@ function createWindow(): void {
       nodeIntegration: false,
       sandbox: true,
       webSecurity: true,
-      spellcheck: false
+      spellcheck: false,
+      devTools: isDev
     }
   })
 

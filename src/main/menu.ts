@@ -1,6 +1,7 @@
 import { Menu } from 'electron'
 
 export function buildMenu(onOpenFile: () => void): void {
+  const isDev = Boolean(process.env['ELECTRON_RENDERER_URL'])
   const template: Electron.MenuItemConstructorOptions[] = [
     {
       label: '文件',
@@ -27,8 +28,9 @@ export function buildMenu(onOpenFile: () => void): void {
       submenu: [
         { role: 'reload', label: '重新加载' },
         { role: 'forceReload', label: '强制重新加载' },
-        { role: 'toggleDevTools', label: '开发者工具' },
-        { type: 'separator' },
+        ...(isDev
+          ? ([{ role: 'toggleDevTools', label: '开发者工具' }, { type: 'separator' }] as Electron.MenuItemConstructorOptions[])
+          : []),
         { role: 'resetZoom', label: '实际大小' },
         { role: 'zoomIn', label: '放大' },
         { role: 'zoomOut', label: '缩小' },
