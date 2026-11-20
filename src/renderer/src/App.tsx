@@ -7,11 +7,14 @@ import { useAppStore } from './stores/app.store'
 
 export default function App() {
   const file = useAppStore((s) => s.file)
+  const workspaceRoot = useAppStore((s) => s.workspaceRoot)
   const theme = useAppStore((s) => s.theme)
   const error = useAppStore((s) => s.error)
   const clearError = useAppStore((s) => s.clearError)
   const openDialog = useAppStore((s) => s.openDialog)
   const openPath = useAppStore((s) => s.openPath)
+  const openWorkspaceDialog = useAppStore((s) => s.openWorkspaceDialog)
+  const bootstrap = useAppStore((s) => s.bootstrap)
 
   useEffect(() => {
     document.documentElement.dataset['theme'] = theme
@@ -19,26 +22,29 @@ export default function App() {
   }, [theme])
 
   useEffect(() => {
-    let disposed = false
-    void window.api.takeStartupFile().then((path) => {
-      if (path && !disposed) void openPath(path)
-    })
+    void bootstrap()
+  }, [bootstrap])
+
+  useEffect(() => {
     const offOpen = window.api.onOpenFileFromMain((path) => {
       void openPath(path)
     })
     const offMenu = window.api.onMenuOpenFile(() => {
       void openDialog()
     })
+    const offFolder = window.api.onMenuOpenFolder(() => {
+      void openWorkspaceDialog()
+    })
     return () => {
-      disposed = true
       offOpen()
       offMenu()
+      offFolder()
     }
-  }, [openPath, openDialog])
+  }, [openPath, openDialog, openWorkspaceDialog])
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
-      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'o') {
+      if ((event.ctrlKey || event.metaKey) && !event.shiftKey && event.key.toLowerCase() === 'o') {
         event.preventDefault()
         void openDialog()
       }
@@ -68,10 +74,10 @@ export default function App() {
     <div className="app">
       <Toolbar />
       <div className="app-body">
-        {file ? (
+        {file || workspaceRoot ? (
           <>
             <Sidebar />
-            <Preview />
+            {file ? <Preview /> : <Welcome />}
           </>
         ) : (
           <Welcome />

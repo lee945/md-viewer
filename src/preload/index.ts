@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import { IPC } from '../shared/ipc'
-import type { ColorScheme, DesktopAPI, DirEntry, FileInfo, IpcResult } from '../shared/types'
+import type { ColorScheme, DesktopAPI, DirEntry, FileOpenResult, IpcResult } from '../shared/types'
 
 function subscribe(channel: string, cb: (payload: string) => void): () => void {
   const listener = (_event: Electron.IpcRendererEvent, payload: string): void => cb(payload)
@@ -11,8 +11,9 @@ function subscribe(channel: string, cb: (payload: string) => void): () => void {
 }
 
 const api: DesktopAPI = {
-  openFileDialog: () => ipcRenderer.invoke(IPC.openDialog) as Promise<IpcResult<FileInfo | null>>,
-  openPath: (filePath) => ipcRenderer.invoke(IPC.openPath, filePath) as Promise<IpcResult<FileInfo>>,
+  openFileDialog: () =>
+    ipcRenderer.invoke(IPC.openDialog) as Promise<IpcResult<FileOpenResult | null>>,
+  openPath: (filePath) => ipcRenderer.invoke(IPC.openPath, filePath) as Promise<IpcResult<FileOpenResult>>,
   takeStartupFile: () => ipcRenderer.invoke(IPC.takeStartupFile) as Promise<string | null>,
   getPathForFile: (file) => {
     try {
@@ -23,6 +24,12 @@ const api: DesktopAPI = {
   },
   onOpenFileFromMain: (cb) => subscribe(IPC.openFileFromMain, cb),
   onMenuOpenFile: (cb) => subscribe(IPC.menuOpenFile, () => cb()),
+  openWorkspaceDialog: () =>
+    ipcRenderer.invoke(IPC.openWorkspaceDialog) as Promise<IpcResult<string | null>>,
+  openWorkspace: (dirPath) =>
+    ipcRenderer.invoke(IPC.openWorkspace, dirPath) as Promise<IpcResult<string>>,
+  getWorkspace: () => ipcRenderer.invoke(IPC.getWorkspace) as Promise<IpcResult<string | null>>,
+  onMenuOpenFolder: (cb) => subscribe(IPC.menuOpenFolder, () => cb()),
   setThemeSource: (theme: ColorScheme) => {
     ipcRenderer.send(IPC.setTheme, theme)
   },

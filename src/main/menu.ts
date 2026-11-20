@@ -1,12 +1,22 @@
 import { Menu } from 'electron'
 
-export function buildMenu(onOpenFile: () => void): void {
+interface MenuHandlers {
+  openFile(): void
+  openFolder(): void
+}
+
+export function buildMenu(handlers: MenuHandlers): void {
   const isDev = Boolean(process.env['ELECTRON_RENDERER_URL'])
   const template: Electron.MenuItemConstructorOptions[] = [
     {
       label: '文件',
       submenu: [
-        { label: '打开文件…', accelerator: 'CmdOrCtrl+O', click: onOpenFile },
+        { label: '打开文件…', accelerator: 'CmdOrCtrl+O', click: handlers.openFile },
+        {
+          label: '打开文件夹…',
+          accelerator: 'CmdOrCtrl+Shift+O',
+          click: handlers.openFolder
+        },
         { type: 'separator' },
         { role: 'quit', label: '退出' }
       ]

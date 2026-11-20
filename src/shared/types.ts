@@ -10,7 +10,21 @@ export interface FileInfo {
   size: number
 }
 
-export type IpcResult<T> = { ok: true; data: T } | { ok: false; error: string }
+export interface FileOpenResult {
+  file: FileInfo
+  workspaceRoot: string
+}
+
+export type IpcErrorCode = 'ENOENT' | 'EACCES' | 'ENOTDIR' | 'EISDIR' | 'UNKNOWN'
+
+export type IpcResult<T> =
+  | { ok: true; data: T }
+  | { ok: false; error: string; code?: IpcErrorCode }
+
+export interface RecentEntry {
+  path: string
+  time: number
+}
 
 export interface DirEntry {
   name: string
@@ -19,12 +33,16 @@ export interface DirEntry {
 }
 
 export interface DesktopAPI {
-  openFileDialog(): Promise<IpcResult<FileInfo | null>>
-  openPath(path: string): Promise<IpcResult<FileInfo>>
+  openFileDialog(): Promise<IpcResult<FileOpenResult | null>>
+  openPath(path: string): Promise<IpcResult<FileOpenResult>>
   takeStartupFile(): Promise<string | null>
   getPathForFile(file: unknown): string
   onOpenFileFromMain(cb: (path: string) => void): () => void
   onMenuOpenFile(cb: () => void): () => void
+  openWorkspaceDialog(): Promise<IpcResult<string | null>>
+  openWorkspace(path: string): Promise<IpcResult<string>>
+  getWorkspace(): Promise<IpcResult<string | null>>
+  onMenuOpenFolder(cb: () => void): () => void
   setThemeSource(theme: ColorScheme): void
   openExternal(url: string): void
   listDir(path: string): Promise<IpcResult<DirEntry[]>>

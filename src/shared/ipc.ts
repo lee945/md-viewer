@@ -4,6 +4,10 @@ export const IPC = {
   takeStartupFile: 'app:take-startup-file',
   openFileFromMain: 'app:open-file',
   menuOpenFile: 'menu:open-file',
+  openWorkspaceDialog: 'workspace:open-dialog',
+  openWorkspace: 'workspace:open',
+  getWorkspace: 'workspace:get',
+  menuOpenFolder: 'menu:open-folder',
   setTheme: 'window:set-theme',
   openExternal: 'shell:open-external',
   listDir: 'fs:list-dir'

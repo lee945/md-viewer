@@ -1,3 +1,5 @@
+export { baseName, isPathInside } from '@shared/paths'
+
 export function dirname(filePath: string): string {
   const idx = Math.max(filePath.lastIndexOf('/'), filePath.lastIndexOf('\\'))
   return idx >= 0 ? filePath.slice(0, idx) : filePath

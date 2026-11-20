@@ -1,12 +1,18 @@
 import { app, BrowserWindow, dialog, ipcMain, nativeTheme, protocol, shell } from 'electron'
 import path from 'node:path'
 import { IPC } from '../shared/ipc'
-import type { ColorScheme, FileInfo, IpcResult } from '../shared/types'
+import type { ColorScheme, FileOpenResult, IpcErrorCode, IpcResult } from '../shared/types'
 import { buildMenu } from './menu'
-import { registerAssetProtocol, setAssetRoot } from './services/assets'
+import { registerAssetProtocol } from './services/assets'
 import { findMarkdownArg } from './services/argv'
 import { listDirectory } from './services/dir'
 import { readMarkdownFile } from './services/text'
+import {
+  applyWorkspace,
+  getWorkspaceRoot,
+  isInsideWorkspace,
+  resolveExistingDir
+} from './services/workspace'
 
 protocol.registerSchemesAsPrivileged([
   {
@@ -19,7 +25,6 @@ let mainWindow: BrowserWindow | null = null
 let startupFile: string | null = null
 let rendererReady = false
 let pendingPath: string | null = null
-let workspaceRoot: string | null = null
 
 const isDev = Boolean(process.env['ELECTRON_RENDERER_URL'])
 
@@ -33,15 +38,41 @@ function isTrusted(event: Electron.IpcMainInvokeEvent): boolean {
   return isAppUrl(event.senderFrame?.url ?? '')
 }
 
-async function openFileByPath(filePath: string): Promise<IpcResult<FileInfo>> {
+function errorCode(err: unknown): IpcErrorCode {
+  const code = (err as NodeJS.ErrnoException | null)?.code
+  if (code === 'ENOENT' || code === 'EACCES' || code === 'ENOTDIR' || code === 'EISDIR') return code
+  return 'UNKNOWN'
+}
+
+function errorResult(err: unknown): IpcResult<never> {
+  return {
+    ok: false,
+    error: err instanceof Error ? err.message : String(err),
+    code: errorCode(err)
+  }
+}
+
+async function openFileByPath(filePath: string): Promise<IpcResult<FileOpenResult>> {
   try {
     const info = await readMarkdownFile(filePath)
-    workspaceRoot = path.dirname(info.path)
-    setAssetRoot(workspaceRoot)
+    // 核心不变量：当前文件永远在工作区内；越界时把根切到文件所在目录
+    if (!isInsideWorkspace(info.path)) applyWorkspace(path.dirname(info.path))
+    const workspaceRoot = getWorkspaceRoot() ?? path.dirname(info.path)
     mainWindow?.setTitle(`${path.basename(info.path)} — MD Viewer`)
-    return { ok: true, data: info }
+    return { ok: true, data: { file: info, workspaceRoot } }
   } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : String(err) }
+    return errorResult(err)
+  }
+}
+
+async function applyWorkspacePath(dirPath: string): Promise<IpcResult<string>> {
+  try {
+    const root = await resolveExistingDir(dirPath)
+    applyWorkspace(root)
+    mainWindow?.setTitle(`${path.basename(root)} — MD Viewer`)
+    return { ok: true, data: root }
+  } catch (err) {
+    return errorResult(err)
   }
 }
 
@@ -134,6 +165,30 @@ function registerIpc(): void {
     return openFileByPath(filePath)
   })
 
+  ipcMain.handle(IPC.openWorkspaceDialog, async (event) => {
+    if (!isTrusted(event)) return { ok: false, error: '未授权的调用来源' }
+    const win = BrowserWindow.fromWebContents(event.sender)
+    const result = await dialog.showOpenDialog(win ?? mainWindow!, {
+      title: '打开文件夹作为工作区',
+      properties: ['openDirectory']
+    })
+    if (result.canceled || result.filePaths.length === 0) return { ok: true, data: null }
+    return applyWorkspacePath(result.filePaths[0])
+  })
+
+  ipcMain.handle(IPC.openWorkspace, async (event, dirPath: unknown) => {
+    if (!isTrusted(event)) return { ok: false, error: '未授权的调用来源' }
+    if (typeof dirPath !== 'string' || dirPath.length === 0 || dirPath.includes('\0')) {
+      return { ok: false, error: '无效的文件夹路径' }
+    }
+    return applyWorkspacePath(dirPath)
+  })
+
+  ipcMain.handle(IPC.getWorkspace, (event) => {
+    if (!isTrusted(event)) return { ok: false, error: '未授权的调用来源' }
+    return { ok: true, data: getWorkspaceRoot() }
+  })
+
   ipcMain.handle(IPC.takeStartupFile, () => {
     const file = startupFile
     startupFile = null
@@ -145,11 +200,12 @@ function registerIpc(): void {
     if (typeof dirPath !== 'string' || dirPath.length === 0) {
       return { ok: false, error: '无效的目录路径' }
     }
-    if (!workspaceRoot) return { ok: false, error: '尚未打开文档' }
+    const root = getWorkspaceRoot()
+    if (!root) return { ok: false, error: '尚未打开工作区' }
     try {
-      return { ok: true, data: await listDirectory(workspaceRoot, dirPath) }
+      return { ok: true, data: await listDirectory(root, dirPath) }
     } catch (err) {
-      return { ok: false, error: err instanceof Error ? err.message : String(err) }
+      return errorResult(err)
     }
   })
 
@@ -181,7 +237,10 @@ if (!gotLock) {
     startupFile = findMarkdownArg(process.argv)
     registerAssetProtocol()
     registerIpc()
-    buildMenu(() => mainWindow?.webContents.send(IPC.menuOpenFile))
+    buildMenu({
+      openFile: () => mainWindow?.webContents.send(IPC.menuOpenFile),
+      openFolder: () => mainWindow?.webContents.send(IPC.menuOpenFolder)
+    })
     createWindow()
 
     app.on('activate', () => {

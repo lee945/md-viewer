@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
 import type { DirEntry } from '@shared/types'
-import { dirname } from '@renderer/markdown/paths'
+import { baseName } from '@renderer/markdown/paths'
 import { useAppStore } from '@renderer/stores/app.store'
 
 interface DirNode {
@@ -9,15 +9,12 @@ interface DirNode {
   error?: string
 }
 
-function baseName(dirPath: string): string {
-  const parts = dirPath.split(/[\\/]/).filter(Boolean)
-  return parts[parts.length - 1] ?? dirPath
-}
-
 export default function FileTree() {
   const file = useAppStore((s) => s.file)
+  const workspaceRoot = useAppStore((s) => s.workspaceRoot)
   const openPath = useAppStore((s) => s.openPath)
-  const root = file ? dirname(file.path) : ''
+  const openWorkspaceDialog = useAppStore((s) => s.openWorkspaceDialog)
+  const root = workspaceRoot ?? ''
   const [cache, setCache] = useState<Record<string, DirNode>>({})
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
 
@@ -35,7 +32,20 @@ export default function FileTree() {
     if (root) void loadDir(root)
   }, [root, loadDir])
 
-  if (!file) return null
+  if (!root) {
+    return (
+      <div className="tree">
+        <p className="tree-empty">还没有打开文件夹</p>
+        <button
+          type="button"
+          className="tree-open"
+          onClick={() => void openWorkspaceDialog()}
+        >
+          打开文件夹…
+        </button>
+      </div>
+    )
+  }
 
   const toggle = (entry: DirEntry): void => {
     setExpanded((prev) => {
@@ -97,7 +107,7 @@ export default function FileTree() {
         <button
           key={entry.path}
           type="button"
-          className={`tree-row tree-file${entry.path === file.path ? ' active' : ''}`}
+          className={`tree-row tree-file${file && entry.path === file.path ? ' active' : ''}`}
           style={{ paddingLeft: 22 + depth * 14 }}
           title={entry.path}
           onClick={() => void openPath(entry.path)}

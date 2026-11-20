@@ -4,8 +4,8 @@ import path from 'node:path'
 
 let allowedRoot: string | null = null
 
-export function setAssetRoot(dir: string): void {
-  allowedRoot = path.resolve(dir)
+export function setAssetRoot(dir: string | null): void {
+  allowedRoot = dir ? path.resolve(dir) : null
 }
 
 const MIME: Record<string, string> = {

@@ -351,8 +351,15 @@ body {
   color: var(--text-muted);
 }
 
-.welcome-open {
+.welcome-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px;
   margin-top: 12px;
+}
+
+.welcome-open {
   padding: 10px 28px;
   font-size: 15px;
   border-radius: 8px;
@@ -366,6 +373,17 @@ body {
   filter: brightness(1.1);
 }
 
+.welcome-open.secondary {
+  background: var(--bg);
+  border-color: var(--border);
+  color: var(--text);
+}
+
+.welcome-open.secondary:hover {
+  background: var(--bg-hover);
+  filter: none;
+}
+
 .welcome-hints {
   display: grid;
   gap: 6px;
@@ -374,6 +392,84 @@ body {
   list-style: none;
   font-size: 13px;
   color: var(--text-muted);
+}
+
+.recent {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: min(560px, 80vw);
+  margin-top: 28px;
+  text-align: left;
+}
+
+.recent h2 {
+  margin: 0 0 6px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+
+.recent-item {
+  appearance: none;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+  border: 0;
+  background: none;
+  color: var(--text);
+  font-size: 13px;
+  text-align: left;
+  padding: 5px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.recent-item:hover {
+  background: var(--bg-hover);
+}
+
+.recent-name {
+  flex: none;
+  max-width: 45%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.recent-dir {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tree-empty {
+  margin: 0 0 10px;
+  padding: 0 6px;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.tree-open {
+  appearance: none;
+  margin: 0 6px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  border-radius: 6px;
+  padding: 5px 12px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.tree-open:hover {
+  background: var(--bg-hover);
 }
 
 .toast-error {
