@@ -2,7 +2,7 @@ import { createHighlighter, type Highlighter } from 'shiki'
 import { createJavaScriptRegexEngine } from 'shiki/engine/javascript'
 
 const THEME_LIGHT = 'github-light'
-const THEME_DARK = 'github-dark'
+const THEME_DARK = 'github-dark-dimmed'
 
 const ALIASES: Record<string, string> = {
   js: 'javascript',

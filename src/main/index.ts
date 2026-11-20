@@ -64,7 +64,7 @@ function createWindow(): void {
     minWidth: 720,
     minHeight: 480,
     show: false,
-    backgroundColor: '#0d1117',
+    backgroundColor: '#22272e',
     title: 'MD Viewer',
     webPreferences: {
       preload: path.join(__dirname, '../preload/index.js'),

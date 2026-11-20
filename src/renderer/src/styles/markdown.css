@@ -106,6 +106,10 @@
   overflow: hidden;
 }
 
+.markdown-body pre.shiki {
+  background: var(--code-bg) !important;
+}
+
 .markdown-body pre code {
   display: block;
   padding: 14px 16px;
