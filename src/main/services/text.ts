@@ -2,7 +2,7 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import iconv from 'iconv-lite'
 import jschardet from 'jschardet'
-import type { FileInfo } from '../../shared/types'
+import type { FileInfo, SaveMeta } from '../../shared/types'
 
 interface Decoded {
   text: string
@@ -89,6 +89,87 @@ export async function readMarkdownFile(filePath: string): Promise<FileInfo> {
     encoding: decoded.encoding,
     hasBOM: decoded.hasBOM,
     lineEnding: detectLineEnding(decoded.text),
-    size: buf.byteLength
+    size: buf.byteLength,
+    mtime: stat.mtimeMs
   }
+}
+
+const BOM_BYTES: Record<string, Buffer> = {
+  utf8: Buffer.from([0xef, 0xbb, 0xbf]),
+  utf16le: Buffer.from([0xff, 0xfe]),
+  utf16be: Buffer.from([0xfe, 0xff])
+}
+
+function encodeContent(content: string, meta: SaveMeta): Buffer {
+  if (meta.encoding !== 'utf8' && !iconv.encodingExists(meta.encoding)) {
+    throw new Error('不支持的编码：' + meta.encoding)
+  }
+  const normalized = content.replace(/\r\n?/g, '\n')
+  const text = meta.lineEnding === 'CRLF' ? normalized.replace(/\n/g, '\r\n') : normalized
+  const body = meta.encoding === 'utf8' ? Buffer.from(text, 'utf8') : iconv.encode(text, meta.encoding)
+  const bom = meta.hasBOM ? BOM_BYTES[meta.encoding] : undefined
+  return bom ? Buffer.concat([bom, body]) : body
+}
+
+/** 写入失败时把 errno 挂到 Error 上，复用主进程统一错误码映射 */
+function withCode(message: string, code: string): NodeJS.ErrnoException {
+  const err = new Error(message) as NodeJS.ErrnoException
+  err.code = code
+  return err
+}
+
+/**
+ * 按原编码/BOM/行尾写回，先写同目录临时文件再 rename，避免半截文件。
+ * expectedMtime 用于防止覆盖外部已修改的内容。
+ */
+export async function writeMarkdownFile(
+  filePath: string,
+  content: string,
+  meta: SaveMeta,
+  expectedMtime?: number
+): Promise<FileInfo> {
+  const resolved = path.resolve(filePath)
+  const stat = await fs.stat(resolved)
+  if (!stat.isFile()) throw new Error('不是文件：' + resolved)
+  if (expectedMtime !== undefined && Math.abs(stat.mtimeMs - expectedMtime) > 1) {
+    throw withCode('文件已在外部修改，请先处理冲突', 'ECONFLICT')
+  }
+
+  const buf = encodeContent(content, meta)
+  // 目标编码可能无法表示部分字符（iconv 会静默替换为 ?），回读一致才落盘
+  const bomLength = meta.hasBOM ? (BOM_BYTES[meta.encoding]?.length ?? 0) : 0
+  const body = buf.subarray(bomLength)
+  const decodedBack = meta.encoding === 'utf8' ? body.toString('utf8') : iconv.decode(body, meta.encoding)
+  const normalized = content.replace(/\r\n?/g, '\n')
+  const expected = meta.lineEnding === 'CRLF' ? normalized.replace(/\n/g, '\r\n') : normalized
+  if (decodedBack !== expected) {
+    throw new Error('当前编码无法完整保存内容（可能包含无法表示的字符）')
+  }
+
+  const tmp = path.join(
+    path.dirname(resolved),
+    `.${path.basename(resolved)}.${process.pid}.${Date.now()}.tmp`
+  )
+  try {
+    await fs.writeFile(tmp, buf)
+    let lastError: unknown = null
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        await fs.rename(tmp, resolved)
+        lastError = null
+        break
+      } catch (err) {
+        lastError = err
+        const code = (err as NodeJS.ErrnoException).code
+        if (code !== 'EPERM' && code !== 'EACCES' && code !== 'EBUSY') break
+        await new Promise((resolve) => setTimeout(resolve, 50 * (attempt + 1)))
+      }
+    }
+    if (lastError) throw lastError
+  } catch (err) {
+    await fs.unlink(tmp).catch(() => undefined)
+    throw err
+  }
+
+  return readMarkdownFile(resolved)
 }

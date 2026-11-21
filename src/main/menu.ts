@@ -1,5 +1,5 @@
 import { Menu } from 'electron'
-import type { ColorScheme, PrefsState, ReadingSettings } from '../shared/types'
+import type { ColorScheme, PrefsState, ReadingSettings, ViewMode } from '../shared/types'
 import {
   CONTENT_WIDTH_OPTIONS,
   FONT_FAMILY_OPTIONS,
@@ -11,15 +11,23 @@ import { PRESET_OPTIONS, type ThemePreset } from '../shared/themes'
 interface MenuHandlers {
   openFile(): void
   openFolder(): void
+  saveFile(): void
   setReading(patch: Partial<ReadingSettings>): void
   setTheme(theme: ColorScheme): void
   setPreset(preset: ThemePreset): void
+  setViewMode(mode: ViewMode): void
   prefs: PrefsState
 }
 
+const VIEW_MODE_OPTIONS: { value: ViewMode; label: string; accelerator: string }[] = [
+  { value: 'read', label: '阅读', accelerator: 'CmdOrCtrl+1' },
+  { value: 'edit', label: '单栏编辑', accelerator: 'CmdOrCtrl+2' },
+  { value: 'split', label: '分栏', accelerator: 'CmdOrCtrl+3' }
+]
+
 export function buildMenu(handlers: MenuHandlers): void {
   const isDev = Boolean(process.env['ELECTRON_RENDERER_URL'])
-  const { reading, theme, preset } = handlers.prefs
+  const { reading, theme, preset, viewMode } = handlers.prefs
 
   const template: Electron.MenuItemConstructorOptions[] = [
     {
@@ -31,6 +39,8 @@ export function buildMenu(handlers: MenuHandlers): void {
           accelerator: 'CmdOrCtrl+Shift+O',
           click: handlers.openFolder
         },
+        { type: 'separator' },
+        { label: '保存', accelerator: 'CmdOrCtrl+S', click: handlers.saveFile },
         { type: 'separator' },
         { role: 'quit', label: '退出' }
       ]
@@ -50,6 +60,17 @@ export function buildMenu(handlers: MenuHandlers): void {
     {
       label: '视图',
       submenu: [
+        {
+          label: '显示模式',
+          submenu: VIEW_MODE_OPTIONS.map((option) => ({
+            label: option.label,
+            type: 'radio',
+            accelerator: option.accelerator,
+            checked: viewMode === option.value,
+            click: () => handlers.setViewMode(option.value)
+          }))
+        },
+        { type: 'separator' },
         {
           label: '阅读设置',
           submenu: [

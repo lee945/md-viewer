@@ -275,6 +275,18 @@ body {
   overflow-y: auto;
 }
 
+.editor-pane {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  overflow: hidden;
+}
+
+.editor-pane .cm-editor {
+  flex: 1;
+  min-width: 0;
+}
+
 .welcome {
   flex: 1;
   display: flex;

@@ -15,6 +15,15 @@ export interface PrefsState {
   reading: ReadingSettings
   theme: ColorScheme
   preset: ThemePreset
+  viewMode: ViewMode
+}
+
+export type ViewMode = 'read' | 'edit' | 'split'
+
+export interface SaveMeta {
+  encoding: string
+  hasBOM: boolean
+  lineEnding: 'LF' | 'CRLF'
 }
 
 export interface FileInfo {
@@ -25,6 +34,7 @@ export interface FileInfo {
   hasBOM: boolean
   lineEnding: 'LF' | 'CRLF'
   size: number
+  mtime: number
 }
 
 export interface FileOpenResult {
@@ -32,7 +42,7 @@ export interface FileOpenResult {
   workspaceRoot: string
 }
 
-export type IpcErrorCode = 'ENOENT' | 'EACCES' | 'ENOTDIR' | 'EISDIR' | 'UNKNOWN'
+export type IpcErrorCode = 'ENOENT' | 'EACCES' | 'ENOTDIR' | 'EISDIR' | 'ECONFLICT' | 'UNKNOWN'
 
 export type IpcResult<T> =
   | { ok: true; data: T }
@@ -70,4 +80,17 @@ export interface DesktopAPI {
   onFileChanged(cb: (path: string) => void): () => void
   onDirChanged(cb: (dir: string) => void): () => void
   readFileSnapshot(path: string): Promise<IpcResult<FileInfo>>
+  saveFile(
+    path: string,
+    content: string,
+    meta: SaveMeta,
+    expectedMtime?: number
+  ): Promise<IpcResult<FileInfo>>
+  setDirty(dirty: boolean): void
+  onMenuSaveFile(cb: () => void): () => void
+  onMenuSetViewMode(cb: (mode: ViewMode) => void): () => void
+  confirmDiscard(): Promise<'save' | 'discard' | 'cancel'>
+  confirmOverwrite(): Promise<boolean>
+  onRequestSaveAndClose(cb: () => void): () => void
+  closeConfirmed(): void
 }

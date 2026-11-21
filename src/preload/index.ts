@@ -7,7 +7,9 @@ import type {
   FileInfo,
   FileOpenResult,
   IpcResult,
-  ReadingSettings
+  ReadingSettings,
+  SaveMeta,
+  ViewMode
 } from '../shared/types'
 import type { ThemePreset } from '../shared/themes'
 
@@ -55,7 +57,23 @@ const api: DesktopAPI = {
   onFileChanged: (cb) => subscribe<string>(IPC.fileChanged, cb),
   onDirChanged: (cb) => subscribe<string>(IPC.dirChanged, cb),
   readFileSnapshot: (filePath: string) =>
-    ipcRenderer.invoke(IPC.readFileSnapshot, filePath) as Promise<IpcResult<FileInfo>>
+    ipcRenderer.invoke(IPC.readFileSnapshot, filePath) as Promise<IpcResult<FileInfo>>,
+  saveFile: (filePath: string, content: string, meta: SaveMeta, expectedMtime?: number) =>
+    ipcRenderer.invoke(IPC.saveFile, filePath, content, meta, expectedMtime) as Promise<
+      IpcResult<FileInfo>
+    >,
+  setDirty: (dirty: boolean) => {
+    ipcRenderer.send(IPC.setDirty, dirty)
+  },
+  onMenuSaveFile: (cb) => subscribe(IPC.menuSaveFile, () => cb()),
+  onMenuSetViewMode: (cb) => subscribe<ViewMode>(IPC.menuSetViewMode, cb),
+  confirmDiscard: () =>
+    ipcRenderer.invoke(IPC.confirmDiscard) as Promise<'save' | 'discard' | 'cancel'>,
+  confirmOverwrite: () => ipcRenderer.invoke(IPC.confirmOverwrite) as Promise<boolean>,
+  onRequestSaveAndClose: (cb) => subscribe(IPC.requestSaveAndClose, () => cb()),
+  closeConfirmed: () => {
+    ipcRenderer.send(IPC.closeConfirmed)
+  }
 }
 
 contextBridge.exposeInMainWorld('api', api)

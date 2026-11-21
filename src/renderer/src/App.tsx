@@ -1,10 +1,12 @@
-import { useEffect, useLayoutEffect, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import type { EditorView } from '@codemirror/view'
+import { useAppStore, registerContentGetter } from './stores/app.store'
+import { useReadingStore } from './stores/reading.store'
+import { samePath } from './stores/persist'
 import Sidebar from './components/Sidebar'
 import Preview from './components/Preview'
 import Welcome from './components/Welcome'
-import { useAppStore } from './stores/app.store'
-import { useReadingStore } from './stores/reading.store'
-import { samePath } from './stores/persist'
+import EditorPane from './editor/EditorPane'
 import { FONT_STACKS } from '@shared/reading'
 import { paletteToVars, THEMES } from '@shared/themes'
 
@@ -13,6 +15,8 @@ export default function App() {
   const workspaceRoot = useAppStore((s) => s.workspaceRoot)
   const theme = useAppStore((s) => s.theme)
   const preset = useAppStore((s) => s.preset)
+  const viewMode = useAppStore((s) => s.viewMode)
+  const dirty = useAppStore((s) => s.dirty)
   const error = useAppStore((s) => s.error)
   const clearError = useAppStore((s) => s.clearError)
   const openDialog = useAppStore((s) => s.openDialog)
@@ -21,6 +25,18 @@ export default function App() {
   const bootstrap = useAppStore((s) => s.bootstrap)
   const reading = useReadingStore((s) => s.settings)
   const [external, setExternal] = useState<{ path: string; deleted: boolean } | null>(null)
+  const editorViewRef = useRef<EditorView | null>(null)
+
+  const handleEditorReady = useCallback((view: EditorView | null) => {
+    editorViewRef.current = view
+  }, [])
+
+  const saveNow = useCallback(async (doc?: string) => {
+    const state = useAppStore.getState()
+    if (!state.file) return false
+    const content = doc ?? editorViewRef.current?.state.doc.toString() ?? state.file.content
+    return state.save(content)
+  }, [])
 
   useLayoutEffect(() => {
     const style = document.documentElement.style
@@ -44,8 +60,17 @@ export default function App() {
   }, [theme, preset])
 
   useEffect(() => {
-    window.api.syncPrefs({ reading, theme, preset })
-  }, [reading, theme, preset])
+    window.api.syncPrefs({ reading, theme, preset, viewMode })
+  }, [reading, theme, preset, viewMode])
+
+  useEffect(() => {
+    window.api.setDirty(dirty)
+  }, [dirty])
+
+  useEffect(() => {
+    registerContentGetter(() => editorViewRef.current?.state.doc.toString() ?? null)
+    return () => registerContentGetter(null)
+  }, [])
 
   useEffect(() => {
     const offReading = window.api.onMenuSetReading((patch) => {
@@ -57,12 +82,26 @@ export default function App() {
     const offPreset = window.api.onMenuSetPreset((next) => {
       useAppStore.getState().setPreset(next)
     })
+    const offSave = window.api.onMenuSaveFile(() => {
+      void saveNow()
+    })
+    const offMode = window.api.onMenuSetViewMode((mode) => {
+      useAppStore.getState().setViewMode(mode)
+    })
+    const offSaveClose = window.api.onRequestSaveAndClose(() => {
+      void saveNow().then((ok) => {
+        if (ok) window.api.closeConfirmed()
+      })
+    })
     return () => {
       offReading()
       offTheme()
       offPreset()
+      offSave()
+      offMode()
+      offSaveClose()
     }
-  }, [])
+  }, [saveNow])
 
   useEffect(() => {
     setExternal(null)
@@ -109,6 +148,11 @@ export default function App() {
       if ((event.ctrlKey || event.metaKey) && !event.shiftKey && event.key.toLowerCase() === 'o') {
         event.preventDefault()
         void openDialog()
+        return
+      }
+      if ((event.ctrlKey || event.metaKey) && !event.shiftKey && event.key.toLowerCase() === 's') {
+        event.preventDefault()
+        void saveNow()
       }
     }
     const preventDefault = (event: DragEvent): void => {
@@ -130,7 +174,7 @@ export default function App() {
       window.removeEventListener('dragover', preventDefault)
       window.removeEventListener('drop', onDrop)
     }
-  }, [openDialog, openPath])
+  }, [openDialog, openPath, saveNow])
 
   return (
     <div className="app">
@@ -138,7 +182,21 @@ export default function App() {
         {file || workspaceRoot ? (
           <>
             <Sidebar />
-            {file ? <Preview /> : <Welcome />}
+            {file ? (
+              viewMode === 'edit' ? (
+                <EditorPane
+                  onReady={handleEditorReady}
+                  onContent={(doc) => useAppStore.getState().setContent(doc)}
+                  onSave={(doc) => {
+                    void saveNow(doc)
+                  }}
+                />
+              ) : (
+                <Preview />
+              )
+            ) : (
+              <Welcome />
+            )}
           </>
         ) : (
           <Welcome />

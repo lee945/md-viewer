@@ -17,5 +17,13 @@ export const IPC = {
   listDir: 'fs:list-dir',
   fileChanged: 'fs:file-changed',
   dirChanged: 'fs:dir-changed',
-  readFileSnapshot: 'file:read-snapshot'
+  readFileSnapshot: 'file:read-snapshot',
+  saveFile: 'file:save',
+  menuSaveFile: 'menu:save-file',
+  setDirty: 'window:set-dirty',
+  menuSetViewMode: 'menu:set-view-mode',
+  confirmDiscard: 'dialog:confirm-discard',
+  confirmOverwrite: 'dialog:confirm-overwrite',
+  requestSaveAndClose: 'app:request-save-close',
+  closeConfirmed: 'app:close-confirmed'
 } as const

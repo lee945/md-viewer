@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { ColorScheme, FileInfo, FileOpenResult, RecentEntry } from '@shared/types'
+import type { ColorScheme, FileInfo, FileOpenResult, RecentEntry, ViewMode } from '@shared/types'
 import { isPathInside } from '@shared/paths'
 import { normalizePreset, type ThemePreset } from '@shared/themes'
 import {
@@ -28,6 +28,10 @@ interface AppState {
   error: string | null
   theme: ColorScheme
   preset: ThemePreset
+  viewMode: ViewMode
+  dirty: boolean
+  savedContent: string | null
+  saving: boolean
   outline: OutlineItem[]
   activeId: string | null
   sidebarTab: SidebarTab
@@ -43,6 +47,10 @@ interface AppState {
   toggleTheme(): void
   setTheme(theme: ColorScheme): void
   setPreset(preset: ThemePreset): void
+  setViewMode(mode: ViewMode): void
+  setContent(content: string): void
+  save(content: string): Promise<boolean>
+  reloadFromDisk(): Promise<void>
   setOutline(outline: OutlineItem[]): void
   setActiveId(id: string | null): void
   setSidebarTab(tab: SidebarTab): void
@@ -55,6 +63,7 @@ type GetState = () => AppState
 const THEME_KEY = 'mdv.theme'
 const PRESET_KEY = 'mdv.theme-preset'
 const SIDEBAR_TAB_KEY = 'mdv.sidebarTab'
+const VIEW_MODE_KEY = 'mdv.viewMode'
 
 let queue: Promise<void> = Promise.resolve()
 
@@ -62,6 +71,26 @@ let queue: Promise<void> = Promise.resolve()
 function enqueue(task: () => Promise<void>): Promise<void> {
   queue = queue.then(task, task)
   return queue
+}
+
+/** 编辑器是编辑态权威；打开/关闭走脏检查时从这里取最新内容 */
+let contentGetter: (() => string | null) | null = null
+
+export function registerContentGetter(getter: (() => string | null) | null): void {
+  contentGetter = getter
+}
+
+function latestContent(state: AppState): string {
+  return contentGetter?.() ?? state.file?.content ?? ''
+}
+
+async function confirmLoseChanges(get: GetState): Promise<boolean> {
+  const state = get()
+  if (!state.dirty || !state.file) return true
+  const choice = await window.api.confirmDiscard()
+  if (choice === 'cancel') return false
+  if (choice === 'save') return get().save(latestContent(state))
+  return true
 }
 
 function initialTheme(): ColorScheme {
@@ -72,6 +101,12 @@ function initialTheme(): ColorScheme {
 
 function initialPreset(): ThemePreset {
   return normalizePreset(localStorage.getItem(PRESET_KEY))
+}
+
+function initialViewMode(): ViewMode {
+  const saved = localStorage.getItem(VIEW_MODE_KEY)
+  if (saved === 'edit' || saved === 'split') return saved
+  return 'read'
 }
 
 function initialSidebarTab(): SidebarTab {
@@ -87,6 +122,8 @@ function applyFile(get: GetState, set: SetState, data: FileOpenResult): void {
     workspaceRoot: data.workspaceRoot,
     recentFiles,
     loading: false,
+    savedContent: data.file.content,
+    dirty: false,
     outline: [],
     activeId: null
   })
@@ -104,6 +141,8 @@ function applyWorkspaceRoot(get: GetState, set: SetState, root: string): void {
     recentWorkspaces,
     loading: false,
     file: keepFile ? current.file : null,
+    savedContent: keepFile ? current.savedContent : null,
+    dirty: keepFile ? current.dirty : false,
     outline: keepFile ? current.outline : [],
     activeId: keepFile ? current.activeId : null
   })
@@ -116,6 +155,10 @@ export const useAppStore = create<AppState>((set, get) => ({
   error: null,
   theme: initialTheme(),
   preset: initialPreset(),
+  viewMode: initialViewMode(),
+  dirty: false,
+  savedContent: null,
+  saving: false,
   outline: [],
   activeId: null,
   sidebarTab: initialSidebarTab(),
@@ -150,6 +193,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   async openDialog() {
     return enqueue(async () => {
+      if (!(await confirmLoseChanges(get))) return
       set({ loading: true, error: null })
       const result = await window.api.openFileDialog()
       if (!result.ok) {
@@ -166,6 +210,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   async openPath(path) {
     return enqueue(async () => {
+      if (!(await confirmLoseChanges(get))) return
       set({ loading: true, error: null })
       const result = await window.api.openPath(path)
       if (!result.ok) {
@@ -184,6 +229,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   async openWorkspaceDialog() {
     return enqueue(async () => {
+      if (!(await confirmLoseChanges(get))) return
       set({ loading: true, error: null })
       const result = await window.api.openWorkspaceDialog()
       if (!result.ok) {
@@ -200,6 +246,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   async openWorkspace(path) {
     return enqueue(async () => {
+      if (!(await confirmLoseChanges(get))) return
       set({ loading: true, error: null })
       const result = await window.api.openWorkspace(path)
       if (!result.ok) {
@@ -240,6 +287,64 @@ export const useAppStore = create<AppState>((set, get) => ({
   setPreset(preset) {
     localStorage.setItem(PRESET_KEY, preset)
     set({ preset })
+  },
+
+  setViewMode(mode) {
+    localStorage.setItem(VIEW_MODE_KEY, mode)
+    set({ viewMode: mode })
+  },
+
+  setContent(content) {
+    const { file, savedContent } = get()
+    if (!file) return
+    const dirty = content !== savedContent
+    set({ file: { ...file, content }, dirty })
+  },
+
+  async save(content) {
+    const state = get()
+    const file = state.file
+    if (!file || state.saving) return false
+    set({ saving: true })
+    const meta = { encoding: file.encoding, hasBOM: file.hasBOM, lineEnding: file.lineEnding }
+    let result = await window.api.saveFile(file.path, content, meta, file.mtime)
+    if (!result.ok && result.code === 'ECONFLICT') {
+      const overwrite = await window.api.confirmOverwrite()
+      if (!overwrite) {
+        set({ saving: false })
+        return false
+      }
+      const snapshot = await window.api.readFileSnapshot(file.path)
+      result = await window.api.saveFile(
+        file.path,
+        content,
+        meta,
+        snapshot.ok ? snapshot.data.mtime : undefined
+      )
+    }
+    if (!result.ok) {
+      set({ saving: false, error: result.error })
+      return false
+    }
+    const saved = result.data
+    set({
+      file: { ...saved, content },
+      savedContent: content,
+      dirty: false,
+      saving: false
+    })
+    return true
+  },
+
+  async reloadFromDisk() {
+    const file = get().file
+    if (!file) return
+    const result = await window.api.readFileSnapshot(file.path)
+    if (!result.ok) {
+      set({ error: result.error })
+      return
+    }
+    set({ file: result.data, savedContent: result.data.content, dirty: false })
   },
 
   setOutline(outline) {

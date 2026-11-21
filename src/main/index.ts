@@ -2,14 +2,22 @@ import { app, BrowserWindow, dialog, ipcMain, nativeTheme, protocol, shell } fro
 import fs from 'node:fs'
 import path from 'node:path'
 import { IPC } from '../shared/ipc'
-import type { ColorScheme, FileOpenResult, IpcErrorCode, IpcResult, PrefsState } from '../shared/types'
+import type {
+  ColorScheme,
+  FileOpenResult,
+  IpcErrorCode,
+  IpcResult,
+  PrefsState,
+  SaveMeta,
+  ViewMode
+} from '../shared/types'
 import { normalizeReading, READING_DEFAULTS } from '../shared/reading'
 import { normalizePreset } from '../shared/themes'
 import { buildMenu } from './menu'
 import { registerAssetProtocol } from './services/assets'
 import { findMarkdownArg } from './services/argv'
 import { listDirectory } from './services/dir'
-import { readMarkdownFile } from './services/text'
+import { readMarkdownFile, writeMarkdownFile } from './services/text'
 import { DirWatchers, FileWatcher, type WatchFactory } from './services/watcher'
 import {
   applyWorkspace,
@@ -29,12 +37,16 @@ let mainWindow: BrowserWindow | null = null
 let startupFile: string | null = null
 let rendererReady = false
 let pendingPath: string | null = null
+let currentFilePath: string | null = null
+let rendererDirty = false
+let allowClose = false
 
 /** 渲染进程同步过来的偏好，仅用于菜单选中态 */
 let prefs: PrefsState = {
   reading: { ...READING_DEFAULTS },
   theme: 'dark',
-  preset: 'github'
+  preset: 'github',
+  viewMode: 'read'
 }
 
 const isDev = Boolean(process.env['ELECTRON_RENDERER_URL'])
@@ -72,20 +84,59 @@ function isTrusted(event: Electron.IpcMainInvokeEvent | Electron.IpcMainEvent): 
   return isAppUrl(event.senderFrame?.url ?? '')
 }
 
+function updateTitle(): void {
+  if (!mainWindow) return
+  const root = getWorkspaceRoot()
+  const name = currentFilePath ? path.basename(currentFilePath) : root ? path.basename(root) : null
+  const prefix = rendererDirty ? '● ' : ''
+  mainWindow.setTitle(name ? `${prefix}${name} — MD Viewer` : 'MD Viewer')
+}
+
+async function promptUnsavedClose(): Promise<void> {
+  if (!mainWindow) return
+  const { response } = await dialog.showMessageBox(mainWindow, {
+    type: 'warning',
+    title: '未保存的修改',
+    message: '当前文件有未保存的修改。',
+    detail: '关闭窗口前是否保存？',
+    buttons: ['保存并退出', '不保存', '取消'],
+    defaultId: 0,
+    cancelId: 2,
+    noLink: true
+  })
+  if (response === 2 || !mainWindow) return
+  if (response === 1) {
+    allowClose = true
+    mainWindow.close()
+    return
+  }
+  mainWindow.webContents.send(IPC.requestSaveAndClose)
+}
+
 function refreshMenu(): void {
   buildMenu({
     openFile: () => mainWindow?.webContents.send(IPC.menuOpenFile),
     openFolder: () => mainWindow?.webContents.send(IPC.menuOpenFolder),
+    saveFile: () => mainWindow?.webContents.send(IPC.menuSaveFile),
     setReading: (patch) => mainWindow?.webContents.send(IPC.menuSetReading, patch),
     setTheme: (theme) => mainWindow?.webContents.send(IPC.menuSetTheme, theme),
     setPreset: (preset) => mainWindow?.webContents.send(IPC.menuSetPreset, preset),
+    setViewMode: (mode) => mainWindow?.webContents.send(IPC.menuSetViewMode, mode),
     prefs
   })
 }
 
 function errorCode(err: unknown): IpcErrorCode {
   const code = (err as NodeJS.ErrnoException | null)?.code
-  if (code === 'ENOENT' || code === 'EACCES' || code === 'ENOTDIR' || code === 'EISDIR') return code
+  if (
+    code === 'ENOENT' ||
+    code === 'EACCES' ||
+    code === 'ENOTDIR' ||
+    code === 'EISDIR' ||
+    code === 'ECONFLICT'
+  ) {
+    return code
+  }
   return 'UNKNOWN'
 }
 
@@ -104,7 +155,9 @@ async function openFileByPath(filePath: string): Promise<IpcResult<FileOpenResul
     if (!isInsideWorkspace(info.path)) setWorkspaceRoot(path.dirname(info.path))
     const workspaceRoot = getWorkspaceRoot() ?? path.dirname(info.path)
     fileWatcher.set(info.path)
-    mainWindow?.setTitle(`${path.basename(info.path)} — MD Viewer`)
+    currentFilePath = info.path
+    rendererDirty = false
+    updateTitle()
     return { ok: true, data: { file: info, workspaceRoot } }
   } catch (err) {
     return errorResult(err)
@@ -115,7 +168,9 @@ async function applyWorkspacePath(dirPath: string): Promise<IpcResult<string>> {
   try {
     const root = await resolveExistingDir(dirPath)
     setWorkspaceRoot(root)
-    mainWindow?.setTitle(`${path.basename(root)} — MD Viewer`)
+    currentFilePath = null
+    rendererDirty = false
+    updateTitle()
     return { ok: true, data: root }
   } catch (err) {
     return errorResult(err)
@@ -160,6 +215,13 @@ function createWindow(): void {
   })
 
   mainWindow.once('ready-to-show', () => mainWindow?.show())
+
+  mainWindow.on('close', (event) => {
+    if (allowClose || !rendererDirty) return
+    event.preventDefault()
+    void promptUnsavedClose()
+  })
+
   mainWindow.on('closed', () => {
     mainWindow = null
     rendererReady = false
@@ -270,6 +332,84 @@ function registerIpc(): void {
     }
   })
 
+  ipcMain.handle(
+    IPC.saveFile,
+    async (event, filePath: unknown, content: unknown, meta: unknown, expectedMtime: unknown) => {
+      if (!isTrusted(event)) return { ok: false, error: '未授权的调用来源' }
+      if (typeof filePath !== 'string' || filePath.length === 0 || filePath.includes('\0')) {
+        return { ok: false, error: '无效的文件路径' }
+      }
+      if (typeof content !== 'string') return { ok: false, error: '无效的文件内容' }
+      if (!isInsideWorkspace(filePath)) return { ok: false, error: '文件不在工作区内' }
+      const m = (typeof meta === 'object' && meta !== null ? meta : null) as Partial<SaveMeta> | null
+      if (
+        !m ||
+        typeof m.encoding !== 'string' ||
+        typeof m.hasBOM !== 'boolean' ||
+        (m.lineEnding !== 'LF' && m.lineEnding !== 'CRLF')
+      ) {
+        return { ok: false, error: '无效的保存参数' }
+      }
+      try {
+        const info = await writeMarkdownFile(
+          filePath,
+          content,
+          { encoding: m.encoding, hasBOM: m.hasBOM, lineEnding: m.lineEnding },
+          typeof expectedMtime === 'number' ? expectedMtime : undefined
+        )
+        // rename 后旧监听可能失效，重新挂载
+        fileWatcher.set(info.path)
+        return { ok: true, data: info }
+      } catch (err) {
+        return errorResult(err)
+      }
+    }
+  )
+
+  ipcMain.on(IPC.setDirty, (event, dirty: unknown) => {
+    if (!isTrusted(event)) return
+    rendererDirty = Boolean(dirty)
+    updateTitle()
+  })
+
+  ipcMain.handle(IPC.confirmDiscard, async (event) => {
+    if (!isTrusted(event)) return 'cancel'
+    const win = BrowserWindow.fromWebContents(event.sender)
+    const { response } = await dialog.showMessageBox(win ?? mainWindow!, {
+      type: 'warning',
+      title: '未保存的修改',
+      message: '当前文件有未保存的修改。',
+      detail: '继续操作前是否保存？',
+      buttons: ['保存', '不保存', '取消'],
+      defaultId: 0,
+      cancelId: 2,
+      noLink: true
+    })
+    return response === 0 ? 'save' : response === 1 ? 'discard' : 'cancel'
+  })
+
+  ipcMain.handle(IPC.confirmOverwrite, async (event) => {
+    if (!isTrusted(event)) return false
+    const win = BrowserWindow.fromWebContents(event.sender)
+    const { response } = await dialog.showMessageBox(win ?? mainWindow!, {
+      type: 'warning',
+      title: '文件冲突',
+      message: '文件已在外部被修改。',
+      detail: '覆盖磁盘上的外部修改吗？此操作不可撤销。',
+      buttons: ['覆盖', '取消'],
+      defaultId: 1,
+      cancelId: 1,
+      noLink: true
+    })
+    return response === 0
+  })
+
+  ipcMain.on(IPC.closeConfirmed, (event) => {
+    if (!isTrusted(event)) return
+    allowClose = true
+    mainWindow?.close()
+  })
+
   ipcMain.on(IPC.setTheme, (_event, theme: ColorScheme) => {
     nativeTheme.themeSource = theme === 'dark' ? 'dark' : 'light'
   })
@@ -277,10 +417,13 @@ function registerIpc(): void {
   ipcMain.on(IPC.syncPrefs, (event, value: unknown) => {
     if (!isTrusted(event)) return
     const data = (typeof value === 'object' && value !== null ? value : {}) as Partial<PrefsState>
+    const viewMode: ViewMode =
+      data.viewMode === 'edit' || data.viewMode === 'split' ? data.viewMode : 'read'
     prefs = {
       reading: normalizeReading(data.reading),
       theme: data.theme === 'light' ? 'light' : 'dark',
-      preset: normalizePreset(data.preset)
+      preset: normalizePreset(data.preset),
+      viewMode
     }
     refreshMenu()
   })
