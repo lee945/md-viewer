@@ -12,6 +12,7 @@ export const IPC = {
   syncPrefs: 'prefs:sync',
   menuSetReading: 'menu:set-reading',
   menuSetTheme: 'menu:set-theme',
+  menuSetPreset: 'menu:set-preset',
   openExternal: 'shell:open-external',
   listDir: 'fs:list-dir'
 } as const

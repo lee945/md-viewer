@@ -5,11 +5,13 @@ import Welcome from './components/Welcome'
 import { useAppStore } from './stores/app.store'
 import { useReadingStore } from './stores/reading.store'
 import { FONT_STACKS } from '@shared/reading'
+import { paletteToVars, THEMES } from '@shared/themes'
 
 export default function App() {
   const file = useAppStore((s) => s.file)
   const workspaceRoot = useAppStore((s) => s.workspaceRoot)
   const theme = useAppStore((s) => s.theme)
+  const preset = useAppStore((s) => s.preset)
   const error = useAppStore((s) => s.error)
   const clearError = useAppStore((s) => s.clearError)
   const openDialog = useAppStore((s) => s.openDialog)
@@ -29,14 +31,19 @@ export default function App() {
     )
   }, [reading])
 
-  useEffect(() => {
-    document.documentElement.dataset['theme'] = theme
+  useLayoutEffect(() => {
+    const root = document.documentElement
+    root.dataset['theme'] = theme
+    root.dataset['themePreset'] = preset
+    for (const [name, value] of Object.entries(paletteToVars(THEMES[preset].scheme[theme]))) {
+      root.style.setProperty(name, value)
+    }
     window.api.setThemeSource(theme)
-  }, [theme])
+  }, [theme, preset])
 
   useEffect(() => {
-    window.api.syncPrefs({ reading, theme })
-  }, [reading, theme])
+    window.api.syncPrefs({ reading, theme, preset })
+  }, [reading, theme, preset])
 
   useEffect(() => {
     const offReading = window.api.onMenuSetReading((patch) => {
@@ -45,9 +52,13 @@ export default function App() {
     const offTheme = window.api.onMenuSetTheme((next) => {
       useAppStore.getState().setTheme(next)
     })
+    const offPreset = window.api.onMenuSetPreset((next) => {
+      useAppStore.getState().setPreset(next)
+    })
     return () => {
       offReading()
       offTheme()
+      offPreset()
     }
   }, [])
 

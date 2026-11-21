@@ -6,18 +6,20 @@ import {
   FONT_SIZE_OPTIONS,
   LINE_HEIGHT_OPTIONS
 } from '../shared/reading'
+import { PRESET_OPTIONS, type ThemePreset } from '../shared/themes'
 
 interface MenuHandlers {
   openFile(): void
   openFolder(): void
   setReading(patch: Partial<ReadingSettings>): void
   setTheme(theme: ColorScheme): void
+  setPreset(preset: ThemePreset): void
   prefs: PrefsState
 }
 
 export function buildMenu(handlers: MenuHandlers): void {
   const isDev = Boolean(process.env['ELECTRON_RENDERER_URL'])
-  const { reading, theme } = handlers.prefs
+  const { reading, theme, preset } = handlers.prefs
 
   const template: Electron.MenuItemConstructorOptions[] = [
     {
@@ -92,6 +94,16 @@ export function buildMenu(handlers: MenuHandlers): void {
         {
           label: '主题',
           submenu: [
+            {
+              label: '风格',
+              submenu: PRESET_OPTIONS.map((option) => ({
+                label: option.label,
+                type: 'radio',
+                checked: preset === option.value,
+                click: () => handlers.setPreset(option.value)
+              }))
+            },
+            { type: 'separator' },
             {
               label: '深色',
               type: 'radio',

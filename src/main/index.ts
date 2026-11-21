@@ -3,6 +3,7 @@ import path from 'node:path'
 import { IPC } from '../shared/ipc'
 import type { ColorScheme, FileOpenResult, IpcErrorCode, IpcResult, PrefsState } from '../shared/types'
 import { normalizeReading, READING_DEFAULTS } from '../shared/reading'
+import { normalizePreset } from '../shared/themes'
 import { buildMenu } from './menu'
 import { registerAssetProtocol } from './services/assets'
 import { findMarkdownArg } from './services/argv'
@@ -30,7 +31,8 @@ let pendingPath: string | null = null
 /** 渲染进程同步过来的偏好，仅用于菜单选中态 */
 let prefs: PrefsState = {
   reading: { ...READING_DEFAULTS },
-  theme: 'dark'
+  theme: 'dark',
+  preset: 'github'
 }
 
 const isDev = Boolean(process.env['ELECTRON_RENDERER_URL'])
@@ -51,6 +53,7 @@ function refreshMenu(): void {
     openFolder: () => mainWindow?.webContents.send(IPC.menuOpenFolder),
     setReading: (patch) => mainWindow?.webContents.send(IPC.menuSetReading, patch),
     setTheme: (theme) => mainWindow?.webContents.send(IPC.menuSetTheme, theme),
+    setPreset: (preset) => mainWindow?.webContents.send(IPC.menuSetPreset, preset),
     prefs
   })
 }
@@ -235,7 +238,8 @@ function registerIpc(): void {
     const data = (typeof value === 'object' && value !== null ? value : {}) as Partial<PrefsState>
     prefs = {
       reading: normalizeReading(data.reading),
-      theme: data.theme === 'light' ? 'light' : 'dark'
+      theme: data.theme === 'light' ? 'light' : 'dark',
+      preset: normalizePreset(data.preset)
     }
     refreshMenu()
   })

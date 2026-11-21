@@ -8,6 +8,7 @@ import type {
   IpcResult,
   ReadingSettings
 } from '../shared/types'
+import type { ThemePreset } from '../shared/themes'
 
 function subscribe<T>(channel: string, cb: (payload: T) => void): () => void {
   const listener = (_event: Electron.IpcRendererEvent, payload: T): void => cb(payload)
@@ -45,6 +46,7 @@ const api: DesktopAPI = {
   },
   onMenuSetReading: (cb) => subscribe<Partial<ReadingSettings>>(IPC.menuSetReading, cb),
   onMenuSetTheme: (cb) => subscribe<ColorScheme>(IPC.menuSetTheme, cb),
+  onMenuSetPreset: (cb) => subscribe<ThemePreset>(IPC.menuSetPreset, cb),
   openExternal: (url: string) => {
     ipcRenderer.send(IPC.openExternal, url)
   },

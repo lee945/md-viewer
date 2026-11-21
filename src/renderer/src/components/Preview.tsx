@@ -66,6 +66,7 @@ function decorate(root: HTMLElement, onZoom: (src: string) => void): void {
 export default function Preview() {
   const file = useAppStore((s) => s.file)
   const theme = useAppStore((s) => s.theme)
+  const preset = useAppStore((s) => s.preset)
   const openPath = useAppStore((s) => s.openPath)
   const setOutline = useAppStore((s) => s.setOutline)
   const setActiveId = useAppStore((s) => s.setActiveId)
@@ -98,7 +99,7 @@ export default function Preview() {
 
     let cancelled = false
     setHtml('')
-    renderMarkdown(file.content, { docPath: file.path, theme })
+    renderMarkdown(file.content, { docPath: file.path, preset, scheme: theme })
       .then((result) => {
         if (!cancelled) setHtml(result)
       })
@@ -108,7 +109,7 @@ export default function Preview() {
     return () => {
       cancelled = true
     }
-  }, [file, theme])
+  }, [file, theme, preset])
 
   useLayoutEffect(() => {
     if (!file || !html) return

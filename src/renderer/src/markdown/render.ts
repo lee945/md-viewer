@@ -1,12 +1,14 @@
 import { md } from './parser'
 import { ensureLanguages, highlightCode } from './highlighter'
 import { sanitizeHtml } from './sanitize'
+import type { ColorScheme } from '@shared/types'
+import type { ThemePreset } from '@shared/themes'
 
-export type RenderTheme = 'light' | 'dark'
+let currentPreset: ThemePreset = 'github'
+let currentScheme: ColorScheme = 'light'
 
-let currentTheme: RenderTheme = 'light'
-
-md.options.highlight = (code: string, lang: string): string => highlightCode(code, lang, currentTheme)
+md.options.highlight = (code: string, lang: string): string =>
+  highlightCode(code, lang, currentPreset, currentScheme)
 
 const FENCE_RE = /^ {0,3}(?:```|~~~)\s*([\w#+.-]+)?/gm
 
@@ -20,9 +22,10 @@ function collectFenceLanguages(source: string): string[] {
 
 export async function renderMarkdown(
   source: string,
-  options: { docPath: string; theme: RenderTheme }
+  options: { docPath: string; preset: ThemePreset; scheme: ColorScheme }
 ): Promise<string> {
-  currentTheme = options.theme
+  currentPreset = options.preset
+  currentScheme = options.scheme
   await ensureLanguages(collectFenceLanguages(source))
   const raw = md.render(source, { docPath: options.docPath })
   return sanitizeHtml(raw)

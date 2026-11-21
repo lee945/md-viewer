@@ -1,3 +1,4 @@
+/* 兜底配色（GitHub 浅色）；实际主题由 App 运行时注入 CSS 变量 */
 :root {
   color-scheme: light;
   --bg: #f5f6f8;
@@ -15,21 +16,8 @@
   --danger: #d1242f;
 }
 
-[data-theme='dark'] {
+:root[data-theme='dark'] {
   color-scheme: dark;
-  --bg: #22272e;
-  --bg-elevated: #2d333b;
-  --bg-hover: #373e47;
-  --text: #adbac7;
-  --text-muted: #768390;
-  --border: #444c56;
-  --accent: #539bf5;
-  --accent-text: #ffffff;
-  --code-bg: #2d333b;
-  --shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
-  --scrollbar-thumb: rgba(173, 186, 199, 0.22);
-  --scrollbar-thumb-hover: rgba(173, 186, 199, 0.4);
-  --danger: #f85149;
 }
 
 * {

@@ -1,8 +1,9 @@
-import { createHighlighter, type Highlighter } from 'shiki'
+import { createHighlighter, type BundledTheme, type Highlighter } from 'shiki'
 import { createJavaScriptRegexEngine } from 'shiki/engine/javascript'
+import { THEMES, type ThemePreset } from '@shared/themes'
+import type { ColorScheme } from '@shared/types'
 
-const THEME_LIGHT = 'github-light'
-const THEME_DARK = 'github-dark-dimmed'
+const SHIKI_THEMES = Object.values(THEMES).flatMap((t) => [t.shiki.light, t.shiki.dark])
 
 const ALIASES: Record<string, string> = {
   js: 'javascript',
@@ -48,7 +49,7 @@ type LangId = Parameters<Highlighter['loadLanguage']>[0]
 function init(): Promise<Highlighter> {
   if (!initPromise) {
     initPromise = createHighlighter({
-      themes: [THEME_LIGHT, THEME_DARK],
+      themes: SHIKI_THEMES as BundledTheme[],
       langs: [],
       engine: createJavaScriptRegexEngine()
     }).then((hl) => {
@@ -85,7 +86,12 @@ export async function ensureLanguages(langs: string[]): Promise<void> {
   )
 }
 
-export function highlightCode(code: string, lang: string | null | undefined, theme: 'light' | 'dark'): string {
+export function highlightCode(
+  code: string,
+  lang: string | null | undefined,
+  preset: ThemePreset,
+  scheme: ColorScheme
+): string {
   if (!lang || !highlighter) return ''
   const id = normalizeLang(lang)
   if (!id || !highlighter.getLoadedLanguages().includes(id)) return ''
@@ -93,7 +99,7 @@ export function highlightCode(code: string, lang: string | null | undefined, the
   try {
     return highlighter.codeToHtml(code, {
       lang: id,
-      theme: theme === 'dark' ? THEME_DARK : THEME_LIGHT
+      theme: THEMES[preset].shiki[scheme] as BundledTheme
     })
   } catch {
     return ''

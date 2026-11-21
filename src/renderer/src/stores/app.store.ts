@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import type { ColorScheme, FileInfo, FileOpenResult, RecentEntry } from '@shared/types'
 import { isPathInside } from '@shared/paths'
+import { normalizePreset, type ThemePreset } from '@shared/themes'
 import {
   loadRecentFiles,
   loadRecentWorkspaces,
@@ -26,6 +27,7 @@ interface AppState {
   loading: boolean
   error: string | null
   theme: ColorScheme
+  preset: ThemePreset
   outline: OutlineItem[]
   activeId: string | null
   sidebarTab: SidebarTab
@@ -40,6 +42,7 @@ interface AppState {
   openRecentWorkspace(path: string): Promise<void>
   toggleTheme(): void
   setTheme(theme: ColorScheme): void
+  setPreset(preset: ThemePreset): void
   setOutline(outline: OutlineItem[]): void
   setActiveId(id: string | null): void
   setSidebarTab(tab: SidebarTab): void
@@ -50,6 +53,7 @@ type SetState = (partial: Partial<AppState>) => void
 type GetState = () => AppState
 
 const THEME_KEY = 'mdv.theme'
+const PRESET_KEY = 'mdv.theme-preset'
 const SIDEBAR_TAB_KEY = 'mdv.sidebarTab'
 
 let queue: Promise<void> = Promise.resolve()
@@ -64,6 +68,10 @@ function initialTheme(): ColorScheme {
   const saved = localStorage.getItem(THEME_KEY)
   if (saved === 'light' || saved === 'dark') return saved
   return window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+}
+
+function initialPreset(): ThemePreset {
+  return normalizePreset(localStorage.getItem(PRESET_KEY))
 }
 
 function initialSidebarTab(): SidebarTab {
@@ -107,6 +115,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   loading: false,
   error: null,
   theme: initialTheme(),
+  preset: initialPreset(),
   outline: [],
   activeId: null,
   sidebarTab: initialSidebarTab(),
@@ -226,6 +235,11 @@ export const useAppStore = create<AppState>((set, get) => ({
   setTheme(theme) {
     localStorage.setItem(THEME_KEY, theme)
     set({ theme })
+  },
+
+  setPreset(preset) {
+    localStorage.setItem(PRESET_KEY, preset)
+    set({ preset })
   },
 
   setOutline(outline) {

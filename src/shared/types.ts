@@ -1,3 +1,5 @@
+import type { ThemePreset } from './themes'
+
 export type ColorScheme = 'light' | 'dark'
 
 export type FontFamilyKey = 'default' | 'serif' | 'kai'
@@ -12,6 +14,7 @@ export interface ReadingSettings {
 export interface PrefsState {
   reading: ReadingSettings
   theme: ColorScheme
+  preset: ThemePreset
 }
 
 export interface FileInfo {
@@ -61,6 +64,7 @@ export interface DesktopAPI {
   syncPrefs(prefs: PrefsState): void
   onMenuSetReading(cb: (patch: Partial<ReadingSettings>) => void): () => void
   onMenuSetTheme(cb: (theme: ColorScheme) => void): () => void
+  onMenuSetPreset(cb: (preset: ThemePreset) => void): () => void
   openExternal(url: string): void
   listDir(path: string): Promise<IpcResult<DirEntry[]>>
 }
