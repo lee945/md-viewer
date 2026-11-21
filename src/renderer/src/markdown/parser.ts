@@ -21,7 +21,7 @@ export function createParser(): InstanceType<typeof MarkdownIt> {
   const md = new MarkdownIt({
     html: true,
     linkify: true,
-    breaks: false,
+    breaks: true,
     typographer: false
   })
 

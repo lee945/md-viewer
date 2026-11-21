@@ -1,4 +1,5 @@
 import { app, BrowserWindow, dialog, ipcMain, nativeTheme, protocol, shell } from 'electron'
+import fs from 'node:fs'
 import path from 'node:path'
 import { IPC } from '../shared/ipc'
 import type { ColorScheme, FileOpenResult, IpcErrorCode, IpcResult, PrefsState } from '../shared/types'
@@ -9,6 +10,7 @@ import { registerAssetProtocol } from './services/assets'
 import { findMarkdownArg } from './services/argv'
 import { listDirectory } from './services/dir'
 import { readMarkdownFile } from './services/text'
+import { DirWatchers, FileWatcher, type WatchFactory } from './services/watcher'
 import {
   applyWorkspace,
   getWorkspaceRoot,
@@ -36,6 +38,29 @@ let prefs: PrefsState = {
 }
 
 const isDev = Boolean(process.env['ELECTRON_RENDERER_URL'])
+
+const watchFactory: WatchFactory = (target, onChange) => {
+  try {
+    const watcher = fs.watch(target, { persistent: false }, () => onChange())
+    watcher.on('error', () => watcher.close())
+    return { close: () => watcher.close() }
+  } catch {
+    return { close: () => undefined }
+  }
+}
+
+const dirWatchers = new DirWatchers(watchFactory, (dir) => {
+  mainWindow?.webContents.send(IPC.dirChanged, dir)
+})
+const fileWatcher = new FileWatcher(watchFactory, (path) => {
+  mainWindow?.webContents.send(IPC.fileChanged, path)
+})
+
+function setWorkspaceRoot(root: string | null): void {
+  applyWorkspace(root)
+  // 换工作区后旧目录监听全部作废，新目录随 listDir 重新注册
+  dirWatchers.clear()
+}
 
 function isAppUrl(url: string): boolean {
   const devUrl = process.env['ELECTRON_RENDERER_URL']
@@ -76,8 +101,9 @@ async function openFileByPath(filePath: string): Promise<IpcResult<FileOpenResul
   try {
     const info = await readMarkdownFile(filePath)
     // 核心不变量：当前文件永远在工作区内；越界时把根切到文件所在目录
-    if (!isInsideWorkspace(info.path)) applyWorkspace(path.dirname(info.path))
+    if (!isInsideWorkspace(info.path)) setWorkspaceRoot(path.dirname(info.path))
     const workspaceRoot = getWorkspaceRoot() ?? path.dirname(info.path)
+    fileWatcher.set(info.path)
     mainWindow?.setTitle(`${path.basename(info.path)} — MD Viewer`)
     return { ok: true, data: { file: info, workspaceRoot } }
   } catch (err) {
@@ -88,7 +114,7 @@ async function openFileByPath(filePath: string): Promise<IpcResult<FileOpenResul
 async function applyWorkspacePath(dirPath: string): Promise<IpcResult<string>> {
   try {
     const root = await resolveExistingDir(dirPath)
-    applyWorkspace(root)
+    setWorkspaceRoot(root)
     mainWindow?.setTitle(`${path.basename(root)} — MD Viewer`)
     return { ok: true, data: root }
   } catch (err) {
@@ -223,7 +249,22 @@ function registerIpc(): void {
     const root = getWorkspaceRoot()
     if (!root) return { ok: false, error: '尚未打开工作区' }
     try {
-      return { ok: true, data: await listDirectory(root, dirPath) }
+      const entries = await listDirectory(root, dirPath)
+      dirWatchers.add(path.resolve(dirPath))
+      return { ok: true, data: entries }
+    } catch (err) {
+      return errorResult(err)
+    }
+  })
+
+  ipcMain.handle(IPC.readFileSnapshot, async (event, filePath: unknown) => {
+    if (!isTrusted(event)) return { ok: false, error: '未授权的调用来源' }
+    if (typeof filePath !== 'string' || filePath.length === 0 || filePath.includes('\0')) {
+      return { ok: false, error: '无效的文件路径' }
+    }
+    if (!isInsideWorkspace(filePath)) return { ok: false, error: '文件不在工作区内' }
+    try {
+      return { ok: true, data: await readMarkdownFile(filePath) }
     } catch (err) {
       return errorResult(err)
     }
@@ -274,6 +315,11 @@ if (!gotLock) {
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow()
     })
+  })
+
+  app.on('before-quit', () => {
+    dirWatchers.clear()
+    fileWatcher.clear()
   })
 
   app.on('window-all-closed', () => {

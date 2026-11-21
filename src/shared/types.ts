@@ -67,4 +67,7 @@ export interface DesktopAPI {
   onMenuSetPreset(cb: (preset: ThemePreset) => void): () => void
   openExternal(url: string): void
   listDir(path: string): Promise<IpcResult<DirEntry[]>>
+  onFileChanged(cb: (path: string) => void): () => void
+  onDirChanged(cb: (dir: string) => void): () => void
+  readFileSnapshot(path: string): Promise<IpcResult<FileInfo>>
 }

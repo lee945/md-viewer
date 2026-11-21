@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import type { DirEntry } from '@shared/types'
 import { baseName } from '@renderer/markdown/paths'
@@ -17,6 +17,8 @@ export default function FileTree() {
   const root = workspaceRoot ?? ''
   const [cache, setCache] = useState<Record<string, DirNode>>({})
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
+  const cacheRef = useRef(cache)
+  cacheRef.current = cache
 
   const loadDir = useCallback(async (dirPath: string) => {
     const result = await window.api.listDir(dirPath)
@@ -30,6 +32,13 @@ export default function FileTree() {
     setCache({})
     setExpanded(new Set())
     if (root) void loadDir(root)
+  }, [root, loadDir])
+
+  useEffect(() => {
+    return window.api.onDirChanged((dirPath) => {
+      // 根目录始终刷新；其余目录仅在已加载（用户展开过）时刷新
+      if (dirPath === root || cacheRef.current[dirPath]) void loadDir(dirPath)
+    })
   }, [root, loadDir])
 
   if (!root) {

@@ -1,9 +1,10 @@
-import { useEffect, useLayoutEffect } from 'react'
+import { useEffect, useLayoutEffect, useState } from 'react'
 import Sidebar from './components/Sidebar'
 import Preview from './components/Preview'
 import Welcome from './components/Welcome'
 import { useAppStore } from './stores/app.store'
 import { useReadingStore } from './stores/reading.store'
+import { samePath } from './stores/persist'
 import { FONT_STACKS } from '@shared/reading'
 import { paletteToVars, THEMES } from '@shared/themes'
 
@@ -19,6 +20,7 @@ export default function App() {
   const openWorkspaceDialog = useAppStore((s) => s.openWorkspaceDialog)
   const bootstrap = useAppStore((s) => s.bootstrap)
   const reading = useReadingStore((s) => s.settings)
+  const [external, setExternal] = useState<{ path: string; deleted: boolean } | null>(null)
 
   useLayoutEffect(() => {
     const style = document.documentElement.style
@@ -60,6 +62,25 @@ export default function App() {
       offTheme()
       offPreset()
     }
+  }, [])
+
+  useEffect(() => {
+    setExternal(null)
+  }, [file])
+
+  useEffect(() => {
+    const off = window.api.onFileChanged((path) => {
+      void window.api.readFileSnapshot(path).then((result) => {
+        const latest = useAppStore.getState().file
+        if (!latest || !samePath(path, latest.path)) return
+        if (!result.ok) {
+          if (result.code === 'ENOENT') setExternal({ path, deleted: true })
+          return
+        }
+        if (result.data.content !== latest.content) setExternal({ path, deleted: false })
+      })
+    })
+    return off
   }, [])
 
   useEffect(() => {
@@ -123,6 +144,26 @@ export default function App() {
           <Welcome />
         )}
       </div>
+      {external && (
+        <div className="external-banner" role="status">
+          <span>{external.deleted ? '文件已被删除或移动' : '文件已在外部修改'}</span>
+          {!external.deleted && (
+            <button
+              type="button"
+              onClick={() => {
+                const target = external.path
+                setExternal(null)
+                void openPath(target)
+              }}
+            >
+              重新加载
+            </button>
+          )}
+          <button type="button" onClick={() => setExternal(null)}>
+            忽略
+          </button>
+        </div>
+      )}
       {error && (
         <div className="toast-error" role="alert">
           <span>{error}</span>

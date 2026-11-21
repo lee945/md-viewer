@@ -39,6 +39,12 @@ describe('renderMarkdown', () => {
     expect(html.toLowerCase()).toContain('shiki')
   })
 
+  it('段落内单个换行渲染为换行（Typora 风格）', async () => {
+    const html = await renderMarkdown('第一行\n第二行', { docPath: DOC, preset: 'github', scheme: 'light' })
+    expect(html).toContain('第一行<br')
+    expect(html).toContain('第二行')
+  })
+
   it('未加载语言时降级为普通代码块', async () => {
     const html = await renderMarkdown('```not-a-language\nhello\n```', { docPath: DOC, preset: 'github', scheme: 'light' })
     expect(html).toContain('<pre><code')

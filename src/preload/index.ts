@@ -4,6 +4,7 @@ import type {
   ColorScheme,
   DesktopAPI,
   DirEntry,
+  FileInfo,
   FileOpenResult,
   IpcResult,
   ReadingSettings
@@ -50,7 +51,11 @@ const api: DesktopAPI = {
   openExternal: (url: string) => {
     ipcRenderer.send(IPC.openExternal, url)
   },
-  listDir: (dirPath: string) => ipcRenderer.invoke(IPC.listDir, dirPath) as Promise<IpcResult<DirEntry[]>>
+  listDir: (dirPath: string) => ipcRenderer.invoke(IPC.listDir, dirPath) as Promise<IpcResult<DirEntry[]>>,
+  onFileChanged: (cb) => subscribe<string>(IPC.fileChanged, cb),
+  onDirChanged: (cb) => subscribe<string>(IPC.dirChanged, cb),
+  readFileSnapshot: (filePath: string) =>
+    ipcRenderer.invoke(IPC.readFileSnapshot, filePath) as Promise<IpcResult<FileInfo>>
 }
 
 contextBridge.exposeInMainWorld('api', api)

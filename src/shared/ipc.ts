@@ -14,5 +14,8 @@ export const IPC = {
   menuSetTheme: 'menu:set-theme',
   menuSetPreset: 'menu:set-preset',
   openExternal: 'shell:open-external',
-  listDir: 'fs:list-dir'
+  listDir: 'fs:list-dir',
+  fileChanged: 'fs:file-changed',
+  dirChanged: 'fs:dir-changed',
+  readFileSnapshot: 'file:read-snapshot'
 } as const
