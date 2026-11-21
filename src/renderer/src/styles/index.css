@@ -1,14 +1,14 @@
 :root {
   color-scheme: light;
-  --bg: #ffffff;
-  --bg-elevated: #f6f7f9;
-  --bg-hover: #eaeef2;
+  --bg: #f5f6f8;
+  --bg-elevated: #eceef2;
+  --bg-hover: #e1e5ea;
   --text: #1f2328;
   --text-muted: #59636e;
   --border: #d1d9e0;
   --accent: #0969da;
   --accent-text: #ffffff;
-  --code-bg: #f6f8fa;
+  --code-bg: #eceff3;
   --shadow: 0 8px 24px rgba(31, 35, 40, 0.12);
   --scrollbar-thumb: rgba(89, 99, 110, 0.35);
   --scrollbar-thumb-hover: rgba(89, 99, 110, 0.6);
