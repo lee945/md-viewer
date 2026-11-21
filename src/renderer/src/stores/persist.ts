@@ -66,3 +66,63 @@ export function saveWorkspace(path: string | null): void {
   if (path) localStorage.setItem(WORKSPACE_KEY, path)
   else localStorage.removeItem(WORKSPACE_KEY)
 }
+
+const SCROLLS_KEY = 'mdv.scrolls'
+const SCROLL_LIMIT = 200
+
+export interface ScrollRecord {
+  top: number
+  t: number
+}
+
+function pathKey(filePath: string): string {
+  return filePath.replace(/\//g, '\\').toLowerCase()
+}
+
+/** 损坏 JSON 返回空表；丢弃非有限或负数的位置 */
+export function parseScrollStore(raw: string | null): Record<string, ScrollRecord> {
+  if (!raw) return {}
+  try {
+    const data: unknown = JSON.parse(raw)
+    if (typeof data !== 'object' || data === null || Array.isArray(data)) return {}
+    const store: Record<string, ScrollRecord> = {}
+    for (const [key, value] of Object.entries(data as Record<string, unknown>)) {
+      if (typeof value !== 'object' || value === null) continue
+      const { top, t } = value as Partial<ScrollRecord>
+      if (typeof top !== 'number' || !Number.isFinite(top) || top < 0) continue
+      store[key] = { top, t: typeof t === 'number' && Number.isFinite(t) ? t : 0 }
+    }
+    return store
+  } catch {
+    return {}
+  }
+}
+
+/** 同路径覆盖、按时间淘汰最旧（返回新对象，不改入参） */
+export function upsertScroll(
+  store: Record<string, ScrollRecord>,
+  filePath: string,
+  top: number,
+  now = Date.now(),
+  limit = SCROLL_LIMIT
+): Record<string, ScrollRecord> {
+  if (!Number.isFinite(top) || top < 0) return { ...store }
+  const key = pathKey(filePath)
+  const entries = Object.entries(store).filter(([existing]) => existing !== key)
+  entries.push([key, { top, t: now }])
+  entries.sort((a, b) => b[1].t - a[1].t)
+  return Object.fromEntries(entries.slice(0, limit))
+}
+
+export function loadScrollPosition(filePath: string): number {
+  return parseScrollStore(localStorage.getItem(SCROLLS_KEY))[pathKey(filePath)]?.top ?? 0
+}
+
+export function saveScrollPosition(filePath: string, top: number): void {
+  try {
+    const store = parseScrollStore(localStorage.getItem(SCROLLS_KEY))
+    localStorage.setItem(SCROLLS_KEY, JSON.stringify(upsertScroll(store, filePath, top)))
+  } catch {
+    // 滚动中高频写入，存储失败时静默忽略
+  }
+}

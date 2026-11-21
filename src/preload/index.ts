@@ -1,9 +1,16 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import { IPC } from '../shared/ipc'
-import type { ColorScheme, DesktopAPI, DirEntry, FileOpenResult, IpcResult } from '../shared/types'
+import type {
+  ColorScheme,
+  DesktopAPI,
+  DirEntry,
+  FileOpenResult,
+  IpcResult,
+  ReadingSettings
+} from '../shared/types'
 
-function subscribe(channel: string, cb: (payload: string) => void): () => void {
-  const listener = (_event: Electron.IpcRendererEvent, payload: string): void => cb(payload)
+function subscribe<T>(channel: string, cb: (payload: T) => void): () => void {
+  const listener = (_event: Electron.IpcRendererEvent, payload: T): void => cb(payload)
   ipcRenderer.on(channel, listener)
   return () => {
     ipcRenderer.removeListener(channel, listener)
@@ -33,6 +40,11 @@ const api: DesktopAPI = {
   setThemeSource: (theme: ColorScheme) => {
     ipcRenderer.send(IPC.setTheme, theme)
   },
+  syncPrefs: (prefs) => {
+    ipcRenderer.send(IPC.syncPrefs, prefs)
+  },
+  onMenuSetReading: (cb) => subscribe<Partial<ReadingSettings>>(IPC.menuSetReading, cb),
+  onMenuSetTheme: (cb) => subscribe<ColorScheme>(IPC.menuSetTheme, cb),
   openExternal: (url: string) => {
     ipcRenderer.send(IPC.openExternal, url)
   },

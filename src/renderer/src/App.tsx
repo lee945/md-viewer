@@ -1,9 +1,10 @@
-import { useEffect } from 'react'
-import Toolbar from './components/Toolbar'
+import { useEffect, useLayoutEffect } from 'react'
 import Sidebar from './components/Sidebar'
 import Preview from './components/Preview'
 import Welcome from './components/Welcome'
 import { useAppStore } from './stores/app.store'
+import { useReadingStore } from './stores/reading.store'
+import { FONT_STACKS } from '@shared/reading'
 
 export default function App() {
   const file = useAppStore((s) => s.file)
@@ -15,11 +16,40 @@ export default function App() {
   const openPath = useAppStore((s) => s.openPath)
   const openWorkspaceDialog = useAppStore((s) => s.openWorkspaceDialog)
   const bootstrap = useAppStore((s) => s.bootstrap)
+  const reading = useReadingStore((s) => s.settings)
+
+  useLayoutEffect(() => {
+    const style = document.documentElement.style
+    style.setProperty('--reading-font-size', `${reading.fontSize}px`)
+    style.setProperty('--reading-font-family', FONT_STACKS[reading.fontFamily])
+    style.setProperty('--reading-line-height', String(reading.lineHeight))
+    style.setProperty(
+      '--content-max-width',
+      reading.contentWidth ? `${reading.contentWidth}px` : 'none'
+    )
+  }, [reading])
 
   useEffect(() => {
     document.documentElement.dataset['theme'] = theme
     window.api.setThemeSource(theme)
   }, [theme])
+
+  useEffect(() => {
+    window.api.syncPrefs({ reading, theme })
+  }, [reading, theme])
+
+  useEffect(() => {
+    const offReading = window.api.onMenuSetReading((patch) => {
+      useReadingStore.getState().setReading(patch)
+    })
+    const offTheme = window.api.onMenuSetTheme((next) => {
+      useAppStore.getState().setTheme(next)
+    })
+    return () => {
+      offReading()
+      offTheme()
+    }
+  }, [])
 
   useEffect(() => {
     void bootstrap()
@@ -72,7 +102,6 @@ export default function App() {
 
   return (
     <div className="app">
-      <Toolbar />
       <div className="app-body">
         {file || workspaceRoot ? (
           <>

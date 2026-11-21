@@ -1,5 +1,19 @@
 export type ColorScheme = 'light' | 'dark'
 
+export type FontFamilyKey = 'default' | 'serif' | 'kai'
+
+export interface ReadingSettings {
+  fontSize: number
+  fontFamily: FontFamilyKey
+  lineHeight: number
+  contentWidth: number | null
+}
+
+export interface PrefsState {
+  reading: ReadingSettings
+  theme: ColorScheme
+}
+
 export interface FileInfo {
   path: string
   content: string
@@ -44,6 +58,9 @@ export interface DesktopAPI {
   getWorkspace(): Promise<IpcResult<string | null>>
   onMenuOpenFolder(cb: () => void): () => void
   setThemeSource(theme: ColorScheme): void
+  syncPrefs(prefs: PrefsState): void
+  onMenuSetReading(cb: (patch: Partial<ReadingSettings>) => void): () => void
+  onMenuSetTheme(cb: (theme: ColorScheme) => void): () => void
   openExternal(url: string): void
   listDir(path: string): Promise<IpcResult<DirEntry[]>>
 }

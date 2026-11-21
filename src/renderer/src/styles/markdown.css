@@ -1,9 +1,10 @@
 .markdown-body {
-  max-width: 860px;
+  max-width: var(--content-max-width, 860px);
   margin: 0 auto;
   padding: 32px 32px 120px;
-  font-size: 15px;
-  line-height: 1.75;
+  font-size: var(--reading-font-size, 15px);
+  line-height: var(--reading-line-height, 1.75);
+  font-family: var(--reading-font-family, inherit);
   overflow-wrap: break-word;
 }
 
@@ -114,7 +115,7 @@
   display: block;
   padding: 14px 16px;
   overflow-x: auto;
-  font-size: 13px;
+  font-size: max(12px, calc(var(--reading-font-size, 15px) - 2px));
   line-height: 1.6;
   background: transparent;
 }
@@ -141,6 +142,7 @@
   max-width: 100%;
   height: auto;
   border-radius: 6px;
+  cursor: zoom-in;
 }
 
 .code-wrap {

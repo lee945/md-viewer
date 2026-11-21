@@ -9,6 +9,9 @@ export const IPC = {
   getWorkspace: 'workspace:get',
   menuOpenFolder: 'menu:open-folder',
   setTheme: 'window:set-theme',
+  syncPrefs: 'prefs:sync',
+  menuSetReading: 'menu:set-reading',
+  menuSetTheme: 'menu:set-theme',
   openExternal: 'shell:open-external',
   listDir: 'fs:list-dir'
 } as const

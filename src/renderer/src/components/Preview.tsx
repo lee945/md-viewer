@@ -1,9 +1,25 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
+import type { FileInfo } from '@shared/types'
 import { renderMarkdown } from '@renderer/markdown/render'
 import { resolveRelative } from '@renderer/markdown/paths'
+import { loadScrollPosition, saveScrollPosition } from '@renderer/stores/persist'
 import { useAppStore } from '@renderer/stores/app.store'
 
-function decorate(root: HTMLElement): void {
+const SAVE_DELAY = 300
+
+function applyProgress(scroller: HTMLElement, bar: HTMLElement, fill: HTMLElement): void {
+  const max = scroller.scrollHeight - scroller.clientHeight
+  if (max > 1) {
+    bar.dataset['visible'] = 'true'
+    const ratio = Math.min(1, Math.max(0, scroller.scrollTop / max))
+    fill.style.transform = `scaleX(${ratio})`
+  } else {
+    bar.dataset['visible'] = 'false'
+  }
+}
+
+function decorate(root: HTMLElement, onZoom: (src: string) => void): void {
   root.querySelectorAll('pre').forEach((pre) => {
     if (pre.parentElement?.classList.contains('code-wrap')) return
 
@@ -29,6 +45,12 @@ function decorate(root: HTMLElement): void {
   })
 
   root.querySelectorAll('img').forEach((img) => {
+    img.addEventListener('click', (event) => {
+      event.preventDefault()
+      event.stopPropagation()
+      onZoom(img.src)
+    })
+
     const markBroken = (): void => {
       const span = document.createElement('span')
       span.className = 'img-error'
@@ -50,13 +72,30 @@ export default function Preview() {
 
   const scrollerRef = useRef<HTMLDivElement>(null)
   const articleRef = useRef<HTMLElement>(null)
+  const barRef = useRef<HTMLDivElement>(null)
+  const progressRef = useRef<HTMLDivElement>(null)
+  const pendingRestoreRef = useRef<number | null>(null)
+  const lastTopRef = useRef(0)
+  const saveTimerRef = useRef(0)
+  const prevFileRef = useRef<FileInfo | null>(null)
   const [html, setHtml] = useState('')
+  const [zoomSrc, setZoomSrc] = useState<string | null>(null)
 
   useEffect(() => {
     if (!file) {
+      prevFileRef.current = null
+      setZoomSrc(null)
       setHtml('')
       return
     }
+    // 换文件：恢复存储的位置；换主题（同一对象）：保持当前阅读位置
+    const isNewFile = prevFileRef.current !== file
+    prevFileRef.current = file
+    pendingRestoreRef.current = isNewFile
+      ? loadScrollPosition(file.path)
+      : (scrollerRef.current?.scrollTop ?? lastTopRef.current)
+    setZoomSrc(null)
+
     let cancelled = false
     setHtml('')
     renderMarkdown(file.content, { docPath: file.path, theme })
@@ -71,9 +110,30 @@ export default function Preview() {
     }
   }, [file, theme])
 
+  useLayoutEffect(() => {
+    if (!file || !html) return
+    const top = pendingRestoreRef.current
+    if (top === null) return
+    const scroller = scrollerRef.current
+    if (scroller) scroller.scrollTop = top
+    lastTopRef.current = top
+    pendingRestoreRef.current = null
+    if (scroller && barRef.current && progressRef.current) {
+      applyProgress(scroller, barRef.current, progressRef.current)
+    }
+  }, [html, file])
+
   useEffect(() => {
-    scrollerRef.current?.scrollTo({ top: 0, left: 0 })
-  }, [file?.path])
+    if (!file) return
+    const path = file.path
+    return () => {
+      if (saveTimerRef.current) {
+        window.clearTimeout(saveTimerRef.current)
+        saveTimerRef.current = 0
+      }
+      saveScrollPosition(path, lastTopRef.current)
+    }
+  }, [file])
 
   useEffect(() => {
     const root = articleRef.current
@@ -82,7 +142,7 @@ export default function Preview() {
       return
     }
 
-    decorate(root)
+    decorate(root, setZoomSrc)
 
     const headings = Array.from(root.querySelectorAll<HTMLElement>('h1,h2,h3,h4,h5,h6'))
     setOutline(
@@ -126,6 +186,13 @@ export default function Preview() {
     let raf = 0
     const update = (): void => {
       raf = 0
+      if (barRef.current && progressRef.current) {
+        applyProgress(scroller, barRef.current, progressRef.current)
+      }
+      // 恢复尚未生效时（清空 html 引起的位置钳制）不记录、不保存
+      if (pendingRestoreRef.current !== null) return
+      lastTopRef.current = scroller.scrollTop
+
       const scrollerTop = scroller.getBoundingClientRect().top
       const headings = Array.from(root.querySelectorAll<HTMLElement>('h1,h2,h3,h4,h5,h6'))
       let current: HTMLElement | null = null
@@ -134,6 +201,15 @@ export default function Preview() {
         else break
       }
       setActiveId(current?.id ?? headings[0]?.id ?? null)
+
+      if (file) {
+        const path = file.path
+        if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current)
+        saveTimerRef.current = window.setTimeout(() => {
+          saveTimerRef.current = 0
+          saveScrollPosition(path, lastTopRef.current)
+        }, SAVE_DELAY)
+      }
     }
     const onScroll = (): void => {
       if (!raf) raf = requestAnimationFrame(update)
@@ -144,18 +220,46 @@ export default function Preview() {
     return () => {
       scroller.removeEventListener('scroll', onScroll)
       if (raf) cancelAnimationFrame(raf)
+      if (saveTimerRef.current) {
+        window.clearTimeout(saveTimerRef.current)
+        saveTimerRef.current = 0
+      }
     }
-  }, [html, setActiveId])
+  }, [html, file, setActiveId])
+
+  useEffect(() => {
+    if (!zoomSrc) return
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') setZoomSrc(null)
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [zoomSrc])
 
   if (!file) return null
 
   return (
     <div className="content" ref={scrollerRef}>
+      <div className="progress-bar" data-visible="false" ref={barRef}>
+        <div className="progress-fill" ref={progressRef} />
+      </div>
       <article
         className="markdown-body"
         ref={articleRef}
         dangerouslySetInnerHTML={{ __html: html }}
       />
+      {zoomSrc &&
+        createPortal(
+          <div
+            className="zoom-overlay"
+            role="dialog"
+            aria-label="图片预览"
+            onClick={() => setZoomSrc(null)}
+          >
+            <img src={zoomSrc} alt="" onClick={(event) => event.stopPropagation()} />
+          </div>,
+          document.body
+        )}
     </div>
   )
 }

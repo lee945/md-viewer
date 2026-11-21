@@ -1,7 +1,8 @@
 import { app, BrowserWindow, dialog, ipcMain, nativeTheme, protocol, shell } from 'electron'
 import path from 'node:path'
 import { IPC } from '../shared/ipc'
-import type { ColorScheme, FileOpenResult, IpcErrorCode, IpcResult } from '../shared/types'
+import type { ColorScheme, FileOpenResult, IpcErrorCode, IpcResult, PrefsState } from '../shared/types'
+import { normalizeReading, READING_DEFAULTS } from '../shared/reading'
 import { buildMenu } from './menu'
 import { registerAssetProtocol } from './services/assets'
 import { findMarkdownArg } from './services/argv'
@@ -26,6 +27,12 @@ let startupFile: string | null = null
 let rendererReady = false
 let pendingPath: string | null = null
 
+/** 渲染进程同步过来的偏好，仅用于菜单选中态 */
+let prefs: PrefsState = {
+  reading: { ...READING_DEFAULTS },
+  theme: 'dark'
+}
+
 const isDev = Boolean(process.env['ELECTRON_RENDERER_URL'])
 
 function isAppUrl(url: string): boolean {
@@ -34,8 +41,18 @@ function isAppUrl(url: string): boolean {
   return url.startsWith('file://')
 }
 
-function isTrusted(event: Electron.IpcMainInvokeEvent): boolean {
+function isTrusted(event: Electron.IpcMainInvokeEvent | Electron.IpcMainEvent): boolean {
   return isAppUrl(event.senderFrame?.url ?? '')
+}
+
+function refreshMenu(): void {
+  buildMenu({
+    openFile: () => mainWindow?.webContents.send(IPC.menuOpenFile),
+    openFolder: () => mainWindow?.webContents.send(IPC.menuOpenFolder),
+    setReading: (patch) => mainWindow?.webContents.send(IPC.menuSetReading, patch),
+    setTheme: (theme) => mainWindow?.webContents.send(IPC.menuSetTheme, theme),
+    prefs
+  })
 }
 
 function errorCode(err: unknown): IpcErrorCode {
@@ -213,6 +230,16 @@ function registerIpc(): void {
     nativeTheme.themeSource = theme === 'dark' ? 'dark' : 'light'
   })
 
+  ipcMain.on(IPC.syncPrefs, (event, value: unknown) => {
+    if (!isTrusted(event)) return
+    const data = (typeof value === 'object' && value !== null ? value : {}) as Partial<PrefsState>
+    prefs = {
+      reading: normalizeReading(data.reading),
+      theme: data.theme === 'light' ? 'light' : 'dark'
+    }
+    refreshMenu()
+  })
+
   ipcMain.on(IPC.openExternal, (_event, url: unknown) => {
     if (typeof url === 'string' && /^(https?:|mailto:)/i.test(url)) {
       void shell.openExternal(url)
@@ -237,10 +264,7 @@ if (!gotLock) {
     startupFile = findMarkdownArg(process.argv)
     registerAssetProtocol()
     registerIpc()
-    buildMenu({
-      openFile: () => mainWindow?.webContents.send(IPC.menuOpenFile),
-      openFolder: () => mainWindow?.webContents.send(IPC.menuOpenFolder)
-    })
+    refreshMenu()
     createWindow()
 
     app.on('activate', () => {

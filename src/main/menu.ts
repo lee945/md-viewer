@@ -1,12 +1,24 @@
 import { Menu } from 'electron'
+import type { ColorScheme, PrefsState, ReadingSettings } from '../shared/types'
+import {
+  CONTENT_WIDTH_OPTIONS,
+  FONT_FAMILY_OPTIONS,
+  FONT_SIZE_OPTIONS,
+  LINE_HEIGHT_OPTIONS
+} from '../shared/reading'
 
 interface MenuHandlers {
   openFile(): void
   openFolder(): void
+  setReading(patch: Partial<ReadingSettings>): void
+  setTheme(theme: ColorScheme): void
+  prefs: PrefsState
 }
 
 export function buildMenu(handlers: MenuHandlers): void {
   const isDev = Boolean(process.env['ELECTRON_RENDERER_URL'])
+  const { reading, theme } = handlers.prefs
+
   const template: Electron.MenuItemConstructorOptions[] = [
     {
       label: '文件',
@@ -36,6 +48,65 @@ export function buildMenu(handlers: MenuHandlers): void {
     {
       label: '视图',
       submenu: [
+        {
+          label: '阅读设置',
+          submenu: [
+            {
+              label: '字号',
+              submenu: FONT_SIZE_OPTIONS.map((size) => ({
+                label: String(size),
+                type: 'radio',
+                checked: reading.fontSize === size,
+                click: () => handlers.setReading({ fontSize: size })
+              }))
+            },
+            {
+              label: '字体',
+              submenu: FONT_FAMILY_OPTIONS.map((option) => ({
+                label: option.label,
+                type: 'radio',
+                checked: reading.fontFamily === option.value,
+                click: () => handlers.setReading({ fontFamily: option.value })
+              }))
+            },
+            {
+              label: '行距',
+              submenu: LINE_HEIGHT_OPTIONS.map((option) => ({
+                label: option.label,
+                type: 'radio',
+                checked: reading.lineHeight === option.value,
+                click: () => handlers.setReading({ lineHeight: option.value })
+              }))
+            },
+            {
+              label: '宽度',
+              submenu: CONTENT_WIDTH_OPTIONS.map((option) => ({
+                label: option.label,
+                type: 'radio',
+                checked: reading.contentWidth === option.value,
+                click: () => handlers.setReading({ contentWidth: option.value })
+              }))
+            }
+          ]
+        },
+        {
+          label: '主题',
+          submenu: [
+            {
+              label: '深色',
+              type: 'radio',
+              checked: theme === 'dark',
+              click: () => handlers.setTheme('dark')
+            },
+            {
+              label: '浅色',
+              type: 'radio',
+              checked: theme === 'light',
+              click: () => handlers.setTheme('light')
+            }
+          ]
+        },
+        { type: 'separator' },
         { role: 'reload', label: '重新加载' },
         { role: 'forceReload', label: '强制重新加载' },
         ...(isDev
