@@ -2,20 +2,22 @@ import MarkdownIt from 'markdown-it'
 import taskLists from 'markdown-it-task-lists'
 import footnote from 'markdown-it-footnote'
 import { resolveRelative, toAssetUrl } from './paths'
+import { uniqueHeadingId } from './slug'
 
 export interface MarkdownEnv {
   docPath: string
 }
 
-function slugify(text: string): string {
-  return text
-    .trim()
-    .toLowerCase()
-    .replace(/\s+/g, '-')
-    .replace(/[^\p{L}\p{N}\-_]/gu, '')
-    .replace(/-{2,}/g, '-')
-    .replace(/^-+|-+$/g, '')
-}
+const LINE_ATTR_TYPES = new Set([
+  'heading_open',
+  'paragraph_open',
+  'blockquote_open',
+  'list_item_open',
+  'table_open',
+  'hr',
+  'fence',
+  'code_block'
+])
 
 export function createParser(): InstanceType<typeof MarkdownIt> {
   const md = new MarkdownIt({
@@ -33,12 +35,31 @@ export function createParser(): InstanceType<typeof MarkdownIt> {
     for (let i = 0; i < state.tokens.length; i++) {
       if (state.tokens[i].type !== 'heading_open') continue
       const inline = state.tokens[i + 1]
-      const base = slugify(inline?.content ?? '') || 'section'
-      const count = used.get(base) ?? 0
-      used.set(base, count + 1)
-      state.tokens[i].attrSet('id', count === 0 ? base : `${base}-${count}`)
+      state.tokens[i].attrSet('id', uniqueHeadingId(used, inline?.content ?? ''))
     }
   })
+
+  // 给块级 token 标注源码行范围，供分屏滚动同步做位置映射
+  md.core.ruler.push('block-line-attrs', (state) => {
+    for (const token of state.tokens) {
+      if (!token.map || !LINE_ATTR_TYPES.has(token.type)) continue
+      token.attrSet('data-line-start', String(token.map[0] + 1))
+      token.attrSet('data-line-end', String(token.map[1] + 1))
+    }
+  })
+
+  // fence/code_block 的默认渲染不输出 token 属性，需要手工注入到 <pre>
+  for (const rule of ['fence', 'code_block'] as const) {
+    const original = md.renderer.rules[rule]
+    if (!original) continue
+    md.renderer.rules[rule] = (tokens, idx, options, env, self) => {
+      const start = tokens[idx].attrGet('data-line-start')
+      const end = tokens[idx].attrGet('data-line-end')
+      const html = original(tokens, idx, options, env, self)
+      if (start === null || end === null) return html
+      return html.replace('<pre', `<pre data-line-start="${start}" data-line-end="${end}"`)
+    }
+  }
 
   const defaultImage =
     md.renderer.rules.image ??

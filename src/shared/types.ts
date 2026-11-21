@@ -18,7 +18,8 @@ export interface PrefsState {
   viewMode: ViewMode
 }
 
-export type ViewMode = 'read' | 'edit' | 'split'
+/** ir = 即时渲染（当前行显源码）、wysiwyg = 标记恒隐藏、split = 源码+预览分屏 */
+export type ViewMode = 'ir' | 'wysiwyg' | 'split'
 
 export interface SaveMeta {
   encoding: string

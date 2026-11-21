@@ -8,7 +8,7 @@ describe('renderMarkdown', () => {
   it('渲染 GFM 表格与任务列表', async () => {
     const source = ['| a | b |', '| --- | --- |', '| 1 | 2 |', '', '- [x] 完成', '- [ ] 未完成'].join('\n')
     const html = await renderMarkdown(source, { docPath: DOC, preset: 'github', scheme: 'light' })
-    expect(html).toContain('<table>')
+    expect(html).toMatch(/<table[ >]/)
     expect(html).toContain('type="checkbox"')
   })
 
@@ -47,7 +47,7 @@ describe('renderMarkdown', () => {
 
   it('未加载语言时降级为普通代码块', async () => {
     const html = await renderMarkdown('```not-a-language\nhello\n```', { docPath: DOC, preset: 'github', scheme: 'light' })
-    expect(html).toContain('<pre><code')
+    expect(html).toMatch(/<pre[^>]*><code/)
     expect(html).toContain('hello')
   })
 })

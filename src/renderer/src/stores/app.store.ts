@@ -80,6 +80,17 @@ export function registerContentGetter(getter: (() => string | null) | null): voi
   contentGetter = getter
 }
 
+/** 单栏编辑模式下大纲点击跳转由编辑器实现，分屏时回退到预览 DOM 滚动 */
+let outlineJumper: ((id: string) => boolean) | null = null
+
+export function registerOutlineJumper(jumper: ((id: string) => boolean) | null): void {
+  outlineJumper = jumper
+}
+
+export function jumpToOutline(id: string): boolean {
+  return outlineJumper?.(id) ?? false
+}
+
 function latestContent(state: AppState): string {
   return contentGetter?.() ?? state.file?.content ?? ''
 }
@@ -105,8 +116,10 @@ function initialPreset(): ThemePreset {
 
 function initialViewMode(): ViewMode {
   const saved = localStorage.getItem(VIEW_MODE_KEY)
-  if (saved === 'edit' || saved === 'split') return saved
-  return 'read'
+  if (saved === 'ir' || saved === 'wysiwyg' || saved === 'split') return saved
+  // 旧版本值迁移：阅读/单栏编辑统一落到即时渲染
+  if (saved === 'read' || saved === 'edit') return 'ir'
+  return 'ir'
 }
 
 function initialSidebarTab(): SidebarTab {

@@ -1,4 +1,4 @@
-import { EditorState } from '@codemirror/state'
+import { Compartment, EditorState, type Extension } from '@codemirror/state'
 import {
   EditorView,
   drawSelection,
@@ -16,7 +16,7 @@ import {
   indentWithTab
 } from '@codemirror/commands'
 import { highlightSelectionMatches, search, searchKeymap } from '@codemirror/search'
-import { markdown } from '@codemirror/lang-markdown'
+import { markdown, markdownLanguage } from '@codemirror/lang-markdown'
 import {
   autocompletion,
   closeBrackets,
@@ -25,10 +25,25 @@ import {
 } from '@codemirror/autocomplete'
 import { HighlightStyle, syntaxHighlighting } from '@codemirror/language'
 import { tags } from '@lezer/highlight'
+import type { ViewMode } from '@shared/types'
+import { livePreviewExtension } from './livePreview'
 
 export interface EditorHandlers {
   onChange(doc: string): void
   onSave(doc: string): void
+}
+
+export interface EditorOptions {
+  viewMode: ViewMode
+  getDocPath: () => string | null
+}
+
+/** 就地渲染开关随显示模式切换，用 Compartment 热重配 */
+export const livePreviewCompartment = new Compartment()
+
+export function livePreviewFor(options: EditorOptions): Extension {
+  if (options.viewMode === 'split') return []
+  return livePreviewExtension(options.viewMode, options.getDocPath)
 }
 
 const markdownHighlight = HighlightStyle.define([
@@ -103,7 +118,11 @@ const editorTheme = EditorView.theme({
   }
 })
 
-export function createEditorState(doc: string, handlers: EditorHandlers): EditorState {
+export function createEditorState(
+  doc: string,
+  handlers: EditorHandlers,
+  options: EditorOptions
+): EditorState {
   return EditorState.create({
     doc,
     extensions: [
@@ -119,8 +138,9 @@ export function createEditorState(doc: string, handlers: EditorHandlers): Editor
       EditorView.lineWrapping,
       search({ top: true }),
       highlightSelectionMatches(),
-      markdown(),
+      markdown({ base: markdownLanguage }),
       syntaxHighlighting(markdownHighlight),
+      livePreviewCompartment.of(livePreviewFor(options)),
       editorTheme,
       keymap.of([
         {

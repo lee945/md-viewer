@@ -46,7 +46,7 @@ let prefs: PrefsState = {
   reading: { ...READING_DEFAULTS },
   theme: 'dark',
   preset: 'github',
-  viewMode: 'read'
+  viewMode: 'ir'
 }
 
 const isDev = Boolean(process.env['ELECTRON_RENDERER_URL'])
@@ -418,7 +418,7 @@ function registerIpc(): void {
     if (!isTrusted(event)) return
     const data = (typeof value === 'object' && value !== null ? value : {}) as Partial<PrefsState>
     const viewMode: ViewMode =
-      data.viewMode === 'edit' || data.viewMode === 'split' ? data.viewMode : 'read'
+      data.viewMode === 'wysiwyg' || data.viewMode === 'split' ? data.viewMode : 'ir'
     prefs = {
       reading: normalizeReading(data.reading),
       theme: data.theme === 'light' ? 'light' : 'dark',

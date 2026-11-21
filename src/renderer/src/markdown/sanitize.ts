@@ -6,7 +6,7 @@ const ALLOWED_URI =
 export function sanitizeHtml(html: string): string {
   return DOMPurify.sanitize(html, {
     ALLOWED_URI_REGEXP: ALLOWED_URI,
-    ADD_ATTR: ['target', 'rel', 'loading'],
+    ADD_ATTR: ['target', 'rel', 'loading', 'data-line-start', 'data-line-end'],
     FORBID_TAGS: ['style', 'iframe', 'frame', 'object', 'embed', 'form'],
     FORBID_ATTR: ['srcset']
   })

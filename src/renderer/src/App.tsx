@@ -5,6 +5,7 @@ import { useReadingStore } from './stores/reading.store'
 import { samePath } from './stores/persist'
 import Sidebar from './components/Sidebar'
 import Preview from './components/Preview'
+import SplitLayout from './components/SplitLayout'
 import Welcome from './components/Welcome'
 import EditorPane from './editor/EditorPane'
 import { FONT_STACKS } from '@shared/reading'
@@ -29,7 +30,9 @@ export default function App() {
 
   const handleEditorReady = useCallback((view: EditorView | null) => {
     editorViewRef.current = view
-  }, [])
+  }, [editorViewRef])
+
+  const getEditorView = useCallback(() => editorViewRef.current, [editorViewRef])
 
   const saveNow = useCallback(async (doc?: string) => {
     const state = useAppStore.getState()
@@ -183,17 +186,18 @@ export default function App() {
           <>
             <Sidebar />
             {file ? (
-              viewMode === 'edit' ? (
-                <EditorPane
-                  onReady={handleEditorReady}
-                  onContent={(doc) => useAppStore.getState().setContent(doc)}
-                  onSave={(doc) => {
-                    void saveNow(doc)
-                  }}
-                />
-              ) : (
-                <Preview />
-              )
+              <SplitLayout
+                editor={
+                  <EditorPane
+                    onReady={handleEditorReady}
+                    onContent={(doc) => useAppStore.getState().setContent(doc)}
+                    onSave={(doc) => {
+                      void saveNow(doc)
+                    }}
+                  />
+                }
+                preview={<Preview getEditorView={getEditorView} />}
+              />
             ) : (
               <Welcome />
             )}

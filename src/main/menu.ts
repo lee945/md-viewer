@@ -20,9 +20,9 @@ interface MenuHandlers {
 }
 
 const VIEW_MODE_OPTIONS: { value: ViewMode; label: string; accelerator: string }[] = [
-  { value: 'read', label: '阅读', accelerator: 'CmdOrCtrl+1' },
-  { value: 'edit', label: '单栏编辑', accelerator: 'CmdOrCtrl+2' },
-  { value: 'split', label: '分栏', accelerator: 'CmdOrCtrl+3' }
+  { value: 'ir', label: '即时渲染', accelerator: 'CmdOrCtrl+1' },
+  { value: 'wysiwyg', label: '所见即所得', accelerator: 'CmdOrCtrl+2' },
+  { value: 'split', label: '分屏预览', accelerator: 'CmdOrCtrl+3' }
 ]
 
 export function buildMenu(handlers: MenuHandlers): void {

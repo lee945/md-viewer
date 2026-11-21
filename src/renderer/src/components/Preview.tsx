@@ -1,12 +1,17 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import type { FileInfo } from '@shared/types'
+import type { EditorView } from '@codemirror/view'
 import { renderMarkdown } from '@renderer/markdown/render'
 import { resolveRelative } from '@renderer/markdown/paths'
 import { loadScrollPosition, saveScrollPosition } from '@renderer/stores/persist'
 import { useAppStore } from '@renderer/stores/app.store'
+import { useScrollSync } from '@renderer/editor/useScrollSync'
 
 const SAVE_DELAY = 300
+
+interface Props {
+  getEditorView: () => EditorView | null
+}
 
 function applyProgress(scroller: HTMLElement, bar: HTMLElement, fill: HTMLElement): void {
   const max = scroller.scrollHeight - scroller.clientHeight
@@ -63,10 +68,11 @@ function decorate(root: HTMLElement, onZoom: (src: string) => void): void {
   })
 }
 
-export default function Preview() {
+export default function Preview({ getEditorView }: Props) {
   const file = useAppStore((s) => s.file)
   const theme = useAppStore((s) => s.theme)
   const preset = useAppStore((s) => s.preset)
+  const viewMode = useAppStore((s) => s.viewMode)
   const openPath = useAppStore((s) => s.openPath)
   const setOutline = useAppStore((s) => s.setOutline)
   const setActiveId = useAppStore((s) => s.setActiveId)
@@ -78,27 +84,42 @@ export default function Preview() {
   const pendingRestoreRef = useRef<number | null>(null)
   const lastTopRef = useRef(0)
   const saveTimerRef = useRef(0)
-  const prevFileRef = useRef<FileInfo | null>(null)
+  const prevPathRef = useRef<string | null>(null)
+  const wasHiddenRef = useRef(false)
   const [html, setHtml] = useState('')
   const [zoomSrc, setZoomSrc] = useState<string | null>(null)
 
   useEffect(() => {
     if (!file) {
-      prevFileRef.current = null
+      prevPathRef.current = null
+      wasHiddenRef.current = false
       setZoomSrc(null)
       setHtml('')
       return
     }
-    // 换文件：恢复存储的位置；换主题（同一对象）：保持当前阅读位置
-    const isNewFile = prevFileRef.current !== file
-    prevFileRef.current = file
-    pendingRestoreRef.current = isNewFile
-      ? loadScrollPosition(file.path)
-      : (scrollerRef.current?.scrollTop ?? lastTopRef.current)
-    setZoomSrc(null)
+    // 分屏之外预览不可见：不重新渲染（保留旧 html 供大纲使用），滚动位置等重新可见时恢复
+    const hidden = viewMode !== 'split'
+    const isNewFile = prevPathRef.current !== file.path
+    const wasHidden = wasHiddenRef.current
+    prevPathRef.current = file.path
+    wasHiddenRef.current = hidden
+
+    if (isNewFile) {
+      // 换文件：清空旧内容并恢复存储的位置
+      pendingRestoreRef.current = loadScrollPosition(file.path)
+      setHtml('')
+      setZoomSrc(null)
+    } else if (hidden) {
+      // display:none 时 scrollTop 不可信，记住上次可见时的位置
+      if (pendingRestoreRef.current === null) pendingRestoreRef.current = lastTopRef.current
+    } else if (!wasHidden && pendingRestoreRef.current === null) {
+      // 内容/主题变化：保持当前阅读位置
+      pendingRestoreRef.current = scrollerRef.current?.scrollTop ?? lastTopRef.current
+    }
+
+    if (hidden) return
 
     let cancelled = false
-    setHtml('')
     renderMarkdown(file.content, { docPath: file.path, preset, scheme: theme })
       .then((result) => {
         if (!cancelled) setHtml(result)
@@ -109,10 +130,10 @@ export default function Preview() {
     return () => {
       cancelled = true
     }
-  }, [file, theme, preset])
+  }, [file, theme, preset, viewMode])
 
   useLayoutEffect(() => {
-    if (!file || !html) return
+    if (!file || !html || viewMode !== 'split') return
     const top = pendingRestoreRef.current
     if (top === null) return
     const scroller = scrollerRef.current
@@ -122,7 +143,7 @@ export default function Preview() {
     if (scroller && barRef.current && progressRef.current) {
       applyProgress(scroller, barRef.current, progressRef.current)
     }
-  }, [html, file])
+  }, [html, file, viewMode])
 
   useEffect(() => {
     if (!file) return
@@ -134,9 +155,15 @@ export default function Preview() {
       }
       saveScrollPosition(path, lastTopRef.current)
     }
-  }, [file])
+  }, [file?.path])
 
   useEffect(() => {
+    if (viewMode !== 'split') setZoomSrc(null)
+  }, [viewMode])
+
+  useEffect(() => {
+    // 非分屏模式下预览不可见，大纲与交互由编辑器负责，避免清空编辑器产出的大纲
+    if (viewMode !== 'split') return
     const root = articleRef.current
     if (!root || !html) {
       setOutline([])
@@ -177,7 +204,7 @@ export default function Preview() {
 
     root.addEventListener('click', onClick)
     return () => root.removeEventListener('click', onClick)
-  }, [html, file, openPath, setOutline])
+  }, [html, file, openPath, setOutline, viewMode])
 
   useEffect(() => {
     const scroller = scrollerRef.current
@@ -187,6 +214,8 @@ export default function Preview() {
     let raf = 0
     const update = (): void => {
       raf = 0
+      // 隐藏期间（display:none）scrollTop 与几何信息都不可信
+      if (scroller.offsetParent === null) return
       if (barRef.current && progressRef.current) {
         applyProgress(scroller, barRef.current, progressRef.current)
       }
@@ -198,7 +227,7 @@ export default function Preview() {
       const headings = Array.from(root.querySelectorAll<HTMLElement>('h1,h2,h3,h4,h5,h6'))
       let current: HTMLElement | null = null
       for (const heading of headings) {
-        if (heading.getBoundingClientRect().top - scrollerTop <= 96) current = heading
+        if (heading.getBoundingClientRect().top - scrollerTop <= 24) current = heading
         else break
       }
       setActiveId(current?.id ?? headings[0]?.id ?? null)
@@ -236,6 +265,14 @@ export default function Preview() {
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [zoomSrc])
+
+  useScrollSync({
+    enabled: viewMode === 'split',
+    html,
+    getEditorView,
+    scrollerRef,
+    articleRef
+  })
 
   if (!file) return null
 
