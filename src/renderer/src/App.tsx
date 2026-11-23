@@ -23,6 +23,7 @@ export default function App() {
   const openDialog = useAppStore((s) => s.openDialog)
   const openPath = useAppStore((s) => s.openPath)
   const openWorkspaceDialog = useAppStore((s) => s.openWorkspaceDialog)
+  const reloadFromDisk = useAppStore((s) => s.reloadFromDisk)
   const bootstrap = useAppStore((s) => s.bootstrap)
   const reading = useReadingStore((s) => s.settings)
   const [external, setExternal] = useState<{ path: string; deleted: boolean } | null>(null)
@@ -208,21 +209,26 @@ export default function App() {
       </div>
       {external && (
         <div className="external-banner" role="status">
-          <span>{external.deleted ? '文件已被删除或移动' : '文件已在外部修改'}</span>
+          <span>
+            {external.deleted
+              ? '文件已被删除或移动'
+              : dirty
+                ? '文件已在外部修改，本地有未保存的更改'
+                : '文件已在外部修改'}
+          </span>
           {!external.deleted && (
             <button
               type="button"
               onClick={() => {
-                const target = external.path
                 setExternal(null)
-                void openPath(target)
+                void reloadFromDisk()
               }}
             >
-              重新加载
+              {dirty ? '重新加载（丢弃本地）' : '重新加载'}
             </button>
           )}
           <button type="button" onClick={() => setExternal(null)}>
-            忽略
+            {dirty && !external.deleted ? '保留本地' : '忽略'}
           </button>
         </div>
       )}
