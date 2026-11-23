@@ -83,11 +83,14 @@ const editorTheme = EditorView.theme({
     color: 'var(--text-muted)',
     borderRight: '1px solid var(--border)'
   },
-  '.cm-activeLine': { backgroundColor: 'var(--bg-hover)' },
+  // 当前行底色用半透明，避免盖住 z-index 为负的选区层
+  '.cm-activeLine': { backgroundColor: 'color-mix(in srgb, var(--bg-hover) 25%, transparent)' },
   '.cm-activeLineGutter': { backgroundColor: 'var(--bg-hover)', color: 'var(--text)' },
-  '.cm-selectionBackground, &.cm-focused .cm-selectionBackground, .cm-content ::selection': {
-    backgroundColor: 'color-mix(in srgb, var(--accent) 25%, transparent)'
-  },
+  // 选择器与 CodeMirror 默认焦点态同结构同特异性，确保覆盖默认浅紫选区色
+  '&.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection':
+    {
+      backgroundColor: 'color-mix(in srgb, var(--accent) 55%, transparent)'
+    },
   '.cm-cursor, .cm-dropCursor': { borderLeftColor: 'var(--accent)' },
   '.cm-panels': { backgroundColor: 'var(--bg-elevated)', color: 'var(--text)' },
   '.cm-panels.cm-panels-top': { borderBottom: '1px solid var(--border)' },
