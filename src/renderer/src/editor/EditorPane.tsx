@@ -295,5 +295,80 @@ export default function EditorPane({ onReady, onContent, onSave }: Props) {
     return () => view.contentDOM.removeEventListener('click', onClick, true)
   }, [filePath])
 
+  // 图片入稿：拖拽或粘贴图片时保存到 assets/，在落点插入 Markdown 图片语法
+  useEffect(() => {
+    const view = viewRef.current
+    if (!view) return
+    const isImage = (file: File): boolean =>
+      file.type.startsWith('image/') || /\.(png|jpe?g|gif|webp|svg|bmp|avif)$/i.test(file.name)
+    const insertImages = (files: File[], pos: number): void => {
+      const current = pathRef.current
+      if (!current || files.length === 0) return
+      void (async () => {
+        const links: string[] = []
+        for (const file of files) {
+          // 来自资源管理器的文件有真实路径，直接复制；剪贴板截图等无路径，改传字节
+          const src = window.api.getPathForFile(file)
+          const result = src
+            ? await window.api.copyImageToAssets(src, current)
+            : await window.api.saveImageBuffer(
+                new Uint8Array(await file.arrayBuffer()),
+                file.type,
+                current
+              )
+          if (result.ok) links.push(`![](${result.data})`)
+        }
+        if (links.length === 0) return
+        const insert = links.join('\n')
+        view.dispatch({
+          changes: { from: pos, insert },
+          selection: { anchor: pos + insert.length }
+        })
+        view.focus()
+      })()
+    }
+    const onDragOver = (event: DragEvent): void => {
+      const dt = event.dataTransfer
+      if (!dt) return
+      const hasImage = Array.from(dt.items).some(
+        (item) => item.kind === 'file' && item.type.startsWith('image/')
+      )
+      if (!hasImage) return
+      event.preventDefault()
+      dt.dropEffect = 'copy'
+    }
+    const onDrop = (event: DragEvent): void => {
+      const dt = event.dataTransfer
+      if (!dt || !pathRef.current) return
+      const files = Array.from(dt.files).filter(isImage)
+      if (files.length === 0) return
+      event.preventDefault()
+      event.stopPropagation()
+      const pos =
+        view.posAtCoords({ x: event.clientX, y: event.clientY }) ?? view.state.selection.main.head
+      insertImages(files, pos)
+    }
+    const onPaste = (event: ClipboardEvent): void => {
+      const dt = event.clipboardData
+      if (!dt) return
+      const files = Array.from(dt.items)
+        .filter((item) => item.kind === 'file' && item.type.startsWith('image/'))
+        .map((item) => item.getAsFile())
+        .filter((file): file is File => Boolean(file))
+      if (files.length === 0) return
+      event.preventDefault()
+      event.stopPropagation()
+      insertImages(files, view.state.selection.main.head)
+    }
+    view.contentDOM.addEventListener('dragover', onDragOver)
+    view.contentDOM.addEventListener('drop', onDrop)
+    view.contentDOM.addEventListener('paste', onPaste)
+    return () => {
+      view.contentDOM.removeEventListener('dragover', onDragOver)
+      view.contentDOM.removeEventListener('drop', onDrop)
+      view.contentDOM.removeEventListener('paste', onPaste)
+    }
+  }, [filePath])
+
   return <div className="editor-pane" ref={hostRef} />
 }

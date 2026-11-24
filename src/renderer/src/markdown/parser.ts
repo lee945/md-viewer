@@ -75,7 +75,8 @@ export function createParser(): InstanceType<typeof MarkdownIt> {
       const absolute = resolveRelative(docPath, src)
       if (absolute) token.attrSet('src', toAssetUrl(absolute))
     }
-    token.attrSet('loading', 'lazy')
+    // md-asset 自定义协议下 Chromium 的懒加载不会真正发起请求，只对远程图片启用
+    if (/^https?:/i.test(String(token.attrGet('src') ?? ''))) token.attrSet('loading', 'lazy')
 
     return defaultImage(tokens, idx, options, env, self)
   }

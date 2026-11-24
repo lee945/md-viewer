@@ -51,6 +51,31 @@ let prefs: PrefsState = {
 
 const isDev = Boolean(process.env['ELECTRON_RENDERER_URL'])
 
+const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.bmp', '.avif'])
+
+const IMAGE_MIME_EXT: Record<string, string> = {
+  'image/png': '.png',
+  'image/jpeg': '.jpg',
+  'image/gif': '.gif',
+  'image/webp': '.webp',
+  'image/svg+xml': '.svg',
+  'image/bmp': '.bmp',
+  'image/avif': '.avif'
+}
+
+/** 在目录中找一个不重名的文件名：base.ext、base-1.ext、base-2.ext… */
+async function uniqueAssetName(dir: string, base: string, ext: string): Promise<string> {
+  let name = `${base}${ext}`
+  for (let n = 1; ; n++) {
+    try {
+      await fs.promises.access(path.join(dir, name))
+      name = `${base}-${n}${ext}`
+    } catch {
+      return name
+    }
+  }
+}
+
 const watchFactory: WatchFactory = (target, onChange) => {
   try {
     const watcher = fs.watch(target, { persistent: false }, () => onChange())
@@ -404,11 +429,60 @@ function registerIpc(): void {
     return response === 0
   })
 
-  ipcMain.on(IPC.closeConfirmed, (event) => {
+  ipcMain.handle(IPC.closeConfirmed, (event) => {
     if (!isTrusted(event)) return
     allowClose = true
     mainWindow?.close()
   })
+
+  ipcMain.handle(IPC.copyImageToAssets, async (event, srcPath: unknown, docPath: unknown) => {
+    if (!isTrusted(event)) return { ok: false, error: '未授权的调用来源' }
+    if (typeof srcPath !== 'string' || !path.isAbsolute(srcPath)) {
+      return { ok: false, error: '无效的图片路径' }
+    }
+    if (typeof docPath !== 'string' || !isInsideWorkspace(docPath)) {
+      return { ok: false, error: '文档不在工作区内' }
+    }
+    const ext = path.extname(srcPath).toLowerCase()
+    if (!IMAGE_EXTENSIONS.has(ext)) return { ok: false, error: '不支持的图片格式' }
+    try {
+      const stat = await fs.promises.stat(srcPath)
+      if (!stat.isFile()) return { ok: false, error: '不是文件' }
+      const assetsDir = path.join(path.dirname(docPath), 'assets')
+      await fs.promises.mkdir(assetsDir, { recursive: true })
+      const base = path.basename(srcPath, ext).replace(/[<>:"/\\|?*\x00-\x1f]/g, '_') || 'image'
+      const name = await uniqueAssetName(assetsDir, base, ext)
+      await fs.promises.copyFile(srcPath, path.join(assetsDir, name))
+      return { ok: true, data: `./assets/${name}` }
+    } catch (err) {
+      return errorResult(err)
+    }
+  })
+
+  ipcMain.handle(
+    IPC.saveImageBuffer,
+    async (event, data: unknown, mime: unknown, docPath: unknown) => {
+      if (!isTrusted(event)) return { ok: false, error: '未授权的调用来源' }
+      if (!(data instanceof Uint8Array)) return { ok: false, error: '无效的图片数据' }
+      if (data.byteLength === 0) return { ok: false, error: '图片为空' }
+      if (data.byteLength > 50 * 1024 * 1024) return { ok: false, error: '图片过大（超过 50MB）' }
+      const ext = typeof mime === 'string' ? IMAGE_MIME_EXT[mime] : undefined
+      if (!ext) return { ok: false, error: '不支持的图片格式' }
+      if (typeof docPath !== 'string' || !isInsideWorkspace(docPath)) {
+        return { ok: false, error: '文档不在工作区内' }
+      }
+      try {
+        const assetsDir = path.join(path.dirname(docPath), 'assets')
+        await fs.promises.mkdir(assetsDir, { recursive: true })
+        const base = `pasted-${Date.now()}`
+        const name = await uniqueAssetName(assetsDir, base, ext)
+        await fs.promises.writeFile(path.join(assetsDir, name), data)
+        return { ok: true, data: `./assets/${name}` }
+      } catch (err) {
+        return errorResult(err)
+      }
+    }
+  )
 
   ipcMain.on(IPC.setTheme, (_event, theme: ColorScheme) => {
     nativeTheme.themeSource = theme === 'dark' ? 'dark' : 'light'

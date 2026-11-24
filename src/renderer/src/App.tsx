@@ -163,11 +163,13 @@ export default function App() {
       event.preventDefault()
     }
     const onDrop = (event: DragEvent): void => {
+      // 编辑器内的图片拖拽已处理并阻止冒泡；其余情况按文件打开
+      if (event.defaultPrevented) return
       event.preventDefault()
       const dropped = event.dataTransfer?.files?.[0]
       if (!dropped) return
       const path = window.api.getPathForFile(dropped)
-      if (path) void openPath(path)
+      if (path && /\.(md|markdown|mdown|mkd|txt)$/i.test(path)) void openPath(path)
     }
 
     window.addEventListener('keydown', onKeyDown)

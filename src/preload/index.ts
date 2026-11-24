@@ -73,7 +73,11 @@ const api: DesktopAPI = {
   onRequestSaveAndClose: (cb) => subscribe(IPC.requestSaveAndClose, () => cb()),
   closeConfirmed: () => {
     ipcRenderer.send(IPC.closeConfirmed)
-  }
+  },
+  copyImageToAssets: (srcPath: string, docPath: string) =>
+    ipcRenderer.invoke(IPC.copyImageToAssets, srcPath, docPath) as Promise<IpcResult<string>>,
+  saveImageBuffer: (data: Uint8Array, mime: string, docPath: string) =>
+    ipcRenderer.invoke(IPC.saveImageBuffer, data, mime, docPath) as Promise<IpcResult<string>>
 }
 
 contextBridge.exposeInMainWorld('api', api)

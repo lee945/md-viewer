@@ -72,7 +72,8 @@ class ImageWidget extends WidgetType {
     const img = document.createElement('img')
     img.src = this.src
     img.alt = this.alt
-    img.loading = 'lazy'
+    // md-asset 自定义协议下 Chromium 的懒加载不会真正发起请求，只对远程图片启用
+    if (/^https?:/i.test(this.src)) img.loading = 'lazy'
     img.draggable = false
     wrap.appendChild(img)
     return wrap

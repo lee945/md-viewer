@@ -25,5 +25,7 @@ export const IPC = {
   confirmDiscard: 'dialog:confirm-discard',
   confirmOverwrite: 'dialog:confirm-overwrite',
   requestSaveAndClose: 'app:request-save-close',
-  closeConfirmed: 'app:close-confirmed'
+  closeConfirmed: 'app:close-confirmed',
+  copyImageToAssets: 'image:copy-to-assets',
+  saveImageBuffer: 'image:save-buffer'
 } as const

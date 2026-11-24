@@ -94,4 +94,8 @@ export interface DesktopAPI {
   confirmOverwrite(): Promise<boolean>
   onRequestSaveAndClose(cb: () => void): () => void
   closeConfirmed(): void
+  /** 把图片复制到文档同目录的 assets/，返回 Markdown 可用的相对路径（如 ./assets/pic.png） */
+  copyImageToAssets(srcPath: string, docPath: string): Promise<IpcResult<string>>
+  /** 把剪贴板等来源的图片字节写入 assets/，返回 Markdown 相对路径 */
+  saveImageBuffer(data: Uint8Array, mime: string, docPath: string): Promise<IpcResult<string>>
 }
