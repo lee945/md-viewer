@@ -85,6 +85,9 @@ const editorTheme = EditorView.theme({
   },
   // 当前行底色用半透明，避免盖住 z-index 为负的选区层
   '.cm-activeLine': { backgroundColor: 'color-mix(in srgb, var(--bg-hover) 25%, transparent)' },
+  // 图片行铺实底色：当前行高亮会裹成大色块，且点选图片时选区层会在透明圆角处透出方框
+  // 源码显示状态除外——铺实底会盖住文字选区
+  '.cm-activeLine.cm-md-image-line:not(.cm-md-image-src)': { backgroundColor: 'var(--bg)' },
   '.cm-activeLineGutter': { backgroundColor: 'var(--bg-hover)', color: 'var(--text)' },
   // 选择器与 CodeMirror 默认焦点态同结构同特异性，确保覆盖默认浅紫选区色
   '&.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection':

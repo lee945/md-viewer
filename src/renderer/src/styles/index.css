@@ -354,8 +354,13 @@ body[data-dragging='true'] {
 .editor-layout[data-mode='wysiwyg'] .cm-content {
   max-width: var(--content-max-width, none);
   margin: 0 auto;
-  padding-top: 24px;
-  padding-bottom: 40vh;
+  padding: 24px 32px 40vh;
+}
+
+/* 分屏源码栏与边框留出呼吸空间 */
+.editor-layout[data-mode='split'] .cm-content {
+  padding-left: 16px;
+  padding-right: 24px;
 }
 
 .cm-md-h1 { font-size: 1.7em; font-weight: 700; line-height: 1.35; }
@@ -398,8 +403,20 @@ body[data-dragging='true'] {
     transparent calc(50% + 1px)
   );
 }
+/* 图片须保持行内元素参与排版：块级会打乱 CodeMirror 的点击定位与选区计算 */
 .cm-md-image { display: inline-block; max-width: 100%; }
 .cm-md-image img { max-width: 100%; border-radius: 4px; vertical-align: middle; }
+/* 图片行整行居中，仅靠 text-align，不改变行内元素的盒模型 */
+/* 铺实底色盖住身后的选区层：点选图片时 CodeMirror 会把整图作为选区，透明圆角会透出方框 */
+.cm-line.cm-md-image-line { text-align: center; background-color: var(--bg); }
+/* 光标在图片行时露出源码：源码左对齐，图片以块级预览显示在行下方 */
+/* 源码行不能铺实底色，否则会盖住选区层导致选中文字没有背景色 */
+.cm-line.cm-md-image-line.cm-md-image-src {
+  text-align: left;
+  background-color: color-mix(in srgb, var(--bg-hover) 25%, transparent);
+}
+.cm-md-image-block { display: flex; justify-content: center; padding: 4px 0 12px; }
+.cm-md-image-block img { max-width: 100%; border-radius: 4px; }
 
 .welcome {
   flex: 1;

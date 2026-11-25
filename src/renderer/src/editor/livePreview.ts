@@ -1,5 +1,5 @@
-import { syntaxTree } from '@codemirror/language'
-import type { Range } from '@codemirror/state'
+import { ensureSyntaxTree, syntaxTree } from '@codemirror/language'
+import { StateField, type EditorState, type Range } from '@codemirror/state'
 import {
   Decoration,
   type DecorationSet,
@@ -28,15 +28,14 @@ class CheckboxWidget extends WidgetType {
   constructor(
     private readonly checked: boolean,
     private readonly from: number,
-    private readonly to: number,
-    private readonly view: EditorView
+    private readonly to: number
   ) {
     super()
   }
   eq(other: CheckboxWidget): boolean {
     return other.checked === this.checked && other.from === this.from && other.to === this.to
   }
-  toDOM(): HTMLElement {
+  toDOM(view: EditorView): HTMLElement {
     const wrap = document.createElement('span')
     wrap.className = 'cm-md-checkbox'
     const box = document.createElement('input')
@@ -44,7 +43,7 @@ class CheckboxWidget extends WidgetType {
     box.checked = this.checked
     box.addEventListener('click', (event) => {
       event.preventDefault()
-      this.view.dispatch({
+      view.dispatch({
         changes: { from: this.from, to: this.to, insert: this.checked ? '[ ]' : '[x]' }
       })
     })
@@ -56,30 +55,79 @@ class CheckboxWidget extends WidgetType {
   }
 }
 
+function fillImage(wrap: HTMLElement, src: string, alt: string): void {
+  const img = document.createElement('img')
+  img.alt = alt
+  img.draggable = false
+  const markBroken = (): void => {
+    const span = document.createElement('span')
+    span.className = 'img-error'
+    const shortAlt = alt.length > 30 ? `${alt.slice(0, 30)}…` : alt
+    span.textContent = shortAlt ? `[图片加载失败] ${shortAlt}` : '[图片加载失败]'
+    if (alt) span.title = alt
+    wrap.replaceChildren(span)
+  }
+  img.src = src
+  // md-asset 自定义协议下 Chromium 的懒加载不会真正发起请求，只对远程图片启用
+  if (/^https?:/i.test(src)) img.loading = 'lazy'
+  wrap.appendChild(img)
+  if (img.complete && img.naturalWidth === 0) markBroken()
+  else img.addEventListener('error', markBroken, { once: true })
+}
+
 class ImageWidget extends WidgetType {
+  constructor(
+    private readonly src: string,
+    private readonly alt: string,
+    private readonly pos: number,
+    private readonly end: number,
+    private readonly mode: LiveMode
+  ) {
+    super()
+  }
+  eq(other: ImageWidget): boolean {
+    return (
+      other.src === this.src &&
+      other.alt === this.alt &&
+      other.pos === this.pos &&
+      other.end === this.end &&
+      other.mode === this.mode
+    )
+  }
+  toDOM(view: EditorView): HTMLElement {
+    const wrap = document.createElement('span')
+    wrap.className = 'cm-md-image'
+    fillImage(wrap, this.src, this.alt)
+    // ir 模式选中整段源码（即刻看到带选区的源码行）；wysiwyg 只落光标，避免整图被选区方框罩住
+    wrap.addEventListener('mousedown', (event) => {
+      event.preventDefault()
+      view.dispatch({
+        selection:
+          this.mode === 'ir' ? { anchor: this.pos, head: this.end } : { anchor: this.pos },
+        scrollIntoView: true,
+        userEvent: 'select'
+      })
+    })
+    return wrap
+  }
+}
+
+/** 光标在图片行时，行下方挂一个块级图片预览，源码行保持真实文本可选中/编辑 */
+class ImageBlockWidget extends WidgetType {
   constructor(
     private readonly src: string,
     private readonly alt: string
   ) {
     super()
   }
-  eq(other: ImageWidget): boolean {
+  eq(other: ImageBlockWidget): boolean {
     return other.src === this.src && other.alt === this.alt
   }
   toDOM(): HTMLElement {
-    const wrap = document.createElement('span')
-    wrap.className = 'cm-md-image'
-    const img = document.createElement('img')
-    img.src = this.src
-    img.alt = this.alt
-    // md-asset 自定义协议下 Chromium 的懒加载不会真正发起请求，只对远程图片启用
-    if (/^https?:/i.test(this.src)) img.loading = 'lazy'
-    img.draggable = false
-    wrap.appendChild(img)
+    const wrap = document.createElement('div')
+    wrap.className = 'cm-md-image-block'
+    fillImage(wrap, this.src, this.alt)
     return wrap
-  }
-  ignoreEvent(): boolean {
-    return true
   }
 }
 
@@ -195,7 +243,7 @@ function buildDecorations(
           const checked = /\[[xX]\]/.test(doc.sliceString(node.from, node.to))
           ranges.push(
             Decoration.replace({
-              widget: new CheckboxWidget(checked, node.from, node.to, view)
+              widget: new CheckboxWidget(checked, node.from, node.to)
             }).range(node.from, node.to)
           )
         }
@@ -263,16 +311,24 @@ function buildDecorations(
       }
 
       if (name === 'Image') {
-        if (!hideAllowed(node.from)) return false
         const marks = child.getChildren('LinkMark')
         const url = child.getChild('URL')
         if (marks.length >= 1 && url) {
           const src = resolveImage(doc.sliceString(url.from, url.to), docPath)
           const alt = marks.length >= 2 ? doc.sliceString(marks[0].to, marks[1].from) : ''
           if (src) {
-            ranges.push(
-              Decoration.replace({ widget: new ImageWidget(src, alt) }).range(node.from, node.to)
-            )
+            if (mode === 'ir' && !hideAllowed(node.from)) {
+              // 光标在本行：源码保留为真实文本（可选中复制/编辑），下方图片由 state 层的块级预览负责
+              lineDeco(node.from, 'cm-md-image-line cm-md-image-src')
+            } else {
+              // 图片是原子块：光标落在该行也保持图片渲染，避免点击一下整行变成源码
+              lineDeco(node.from, 'cm-md-image-line')
+              ranges.push(
+                Decoration.replace({
+                  widget: new ImageWidget(src, alt, node.from, node.to, mode)
+                }).range(node.from, node.to)
+              )
+            }
           }
         }
         return false
@@ -287,7 +343,7 @@ function buildDecorations(
 
 /** 就地渲染：ir 模式当前行显示源码标记，wysiwyg 模式标记恒隐藏 */
 export function livePreviewExtension(mode: LiveMode, getDocPath: () => string | null) {
-  return ViewPlugin.fromClass(
+  const inline = ViewPlugin.fromClass(
     class {
       decorations: DecorationSet
       constructor(view: EditorView) {
@@ -301,4 +357,60 @@ export function livePreviewExtension(mode: LiveMode, getDocPath: () => string | 
     },
     { decorations: (plugin) => plugin.decorations }
   )
+  return [blockPreviewField(mode, getDocPath), inline]
+}
+
+/**
+ * 光标所在图片行下方的块级图片预览。
+ * 块级装饰不允许由 ViewPlugin 提供（CodeMirror 限制），所以单独放在 StateField 里。
+ */
+function blockPreviewField(mode: LiveMode, getDocPath: () => string | null) {
+  return StateField.define<DecorationSet>({
+    create: (state) => buildBlockPreviews(state, mode, getDocPath()),
+    update: (deco, tr) => {
+      if (tr.docChanged || tr.selection) return buildBlockPreviews(tr.state, mode, getDocPath())
+      return deco.map(tr.changes)
+    },
+    provide: (field) => EditorView.decorations.from(field)
+  })
+}
+
+function buildBlockPreviews(
+  state: EditorState,
+  mode: LiveMode,
+  docPath: string | null
+): DecorationSet {
+  if (mode !== 'ir') return Decoration.none
+  const doc = state.doc
+  const ranges: Range<Decoration>[] = []
+  const seen = new Set<number>()
+  for (const range of state.selection.ranges) {
+    const line = doc.lineAt(range.from)
+    if (seen.has(line.number)) continue
+    seen.add(line.number)
+    const tree = ensureSyntaxTree(state, line.to, 50) ?? syntaxTree(state)
+    tree.iterate({
+      from: line.from,
+      to: line.to,
+      enter: (node) => {
+        if (node.name !== 'Image') return
+        const child = node.node
+        const url = child.getChild('URL')
+        if (!url) return
+        const src = resolveImage(doc.sliceString(url.from, url.to), docPath)
+        if (!src) return
+        const marks = child.getChildren('LinkMark')
+        const alt = marks.length >= 2 ? doc.sliceString(marks[0].to, marks[1].from) : ''
+        ranges.push(
+          Decoration.widget({
+            widget: new ImageBlockWidget(src, alt),
+            block: true,
+            side: 1
+          }).range(doc.lineAt(node.from).to)
+        )
+        return false
+      }
+    })
+  }
+  return Decoration.set(ranges, true)
 }
