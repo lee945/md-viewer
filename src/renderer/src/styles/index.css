@@ -376,11 +376,29 @@ body[data-dragging='true'] {
 .cm-md-strike { text-decoration: line-through; color: var(--text-muted); }
 .cm-md-code {
   font-family: 'Cascadia Mono', Consolas, 'Microsoft YaHei', monospace;
-  background: var(--code-bg);
+  background: color-mix(in srgb, var(--text) 13%, transparent);
+  border: 1px solid color-mix(in srgb, var(--text) 11%, transparent);
   border-radius: 4px;
   padding: 0 3px;
   font-size: 0.92em;
 }
+.cm-md-html-kbd {
+  font-family: 'Cascadia Mono', Consolas, 'Microsoft YaHei', monospace;
+  font-size: 0.85em;
+  background: color-mix(in srgb, var(--text) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--text) 18%, transparent);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  padding: 0.08em 0.4em;
+  white-space: nowrap;
+}
+.cm-md-html-mark {
+  background: color-mix(in srgb, #f2b81d 32%, transparent);
+  border-radius: 2px;
+  padding: 0 1px;
+}
+.cm-md-html-sub { font-size: 0.75em; vertical-align: sub; }
+.cm-md-html-sup { font-size: 0.75em; vertical-align: super; }
 .cm-md-link {
   color: var(--accent);
   text-decoration: underline;
@@ -392,9 +410,10 @@ body[data-dragging='true'] {
 .cm-md-checkbox input { margin: 0; vertical-align: middle; cursor: pointer; }
 .cm-md-quote {
   border-left: 3px solid var(--border);
-  color: var(--text-muted);
+  color: color-mix(in srgb, var(--text) 85%, transparent);
   padding-left: 12px;
 }
+.cm-md-quote-d2 { padding-left: 26px; }
 .cm-md-hr {
   background: linear-gradient(
     transparent calc(50% - 1px),
@@ -417,6 +436,99 @@ body[data-dragging='true'] {
 }
 .cm-md-image-block { display: flex; justify-content: center; padding: 4px 0 12px; }
 .cm-md-image-block img { max-width: 100%; border-radius: 4px; }
+
+/* 就地渲染的块级呈现：代码块/表格/HTML 块/脚注定义隐藏源码行，换成渲染结果 */
+.cm-line.cm-md-block-hidden {
+  display: none;
+}
+/* 代码块编辑态：围栏行隐藏，内容行以代码样式就地编辑。
+   底色用半透明，避免盖住 z-index 为负的选区层 */
+.cm-line.cm-md-codeblock-src {
+  background: color-mix(in srgb, var(--code-bg) 65%, transparent);
+  font-family: 'Cascadia Mono', Consolas, 'Microsoft YaHei', monospace;
+  font-size: 0.92em;
+  line-height: 1.6;
+  padding-left: 28px;
+  padding-right: 20px;
+}
+.cm-line.cm-md-codeblock-src.cm-md-codeblock-first {
+  padding-top: 10px;
+  border-radius: 6px 6px 0 0;
+}
+.cm-line.cm-md-codeblock-src.cm-md-codeblock-last {
+  padding-bottom: 10px;
+  border-radius: 0 0 6px 6px;
+}
+.cm-line.cm-md-codeblock-src.cm-md-codeblock-first.cm-md-codeblock-last {
+  border-radius: 6px;
+}
+/* 编辑态围栏行：保留占位显示（display:none 的隐藏行紧邻可编辑行会让原生光标移动错乱），
+   以暗色小字呈现，像代码块顶部的语言标签行 */
+.cm-line.cm-md-codeblock-src.cm-md-codeblock-fence {
+  font-size: 0.78em;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+.cm-line.cm-md-codeblock-src.cm-md-codeblock-fence.cm-md-codeblock-first {
+  padding-top: 8px;
+}
+.cm-line.cm-md-codeblock-src.cm-md-codeblock-fence.cm-md-codeblock-last {
+  padding-bottom: 8px;
+}
+/* 渲染态代码块左上角的语言标签（悬停显示，点击露出围栏行） */
+.code-lang-tag {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  padding: 3px 8px;
+  font-family: 'Cascadia Mono', Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.2;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text-muted);
+  cursor: text;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.code-wrap:hover .code-lang-tag,
+.code-lang-tag:focus-visible {
+  opacity: 1;
+}
+.cm-md-block {
+  padding: 2px 0 6px;
+}
+/* 复用 .markdown-body 的排版样式，但不受阅读栏宽度/内边距约束 */
+.cm-md-rendered.markdown-body {
+  max-width: none;
+  margin: 0;
+  padding: 0 12px;
+  font-size: inherit;
+  line-height: inherit;
+}
+.cm-md-rendered.markdown-body pre {
+  margin: 0 0 0.5em;
+}
+.cm-md-rendered.markdown-body table {
+  margin-bottom: 0.5em;
+}
+.cm-md-fn-ref {
+  color: var(--accent);
+  font-size: 0.75em;
+  vertical-align: super;
+}
+.cm-md-fn-def {
+  display: flex;
+  gap: 6px;
+  padding: 2px 0;
+  font-size: 0.92em;
+  color: var(--text-muted);
+}
+.cm-md-fn-def .fn-label {
+  flex: none;
+  color: var(--accent);
+}
 
 .welcome {
   flex: 1;

@@ -50,7 +50,7 @@ export const THEMES: Record<ThemePreset, MarkdownTheme> = {
         bg: '#22272e',
         bgElevated: '#2d333b',
         bgHover: '#373e47',
-        text: '#adbac7',
+        text: '#e6edf3',
         textMuted: '#768390',
         border: '#444c56',
         accent: '#539bf5',

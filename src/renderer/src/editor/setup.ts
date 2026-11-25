@@ -1,4 +1,4 @@
-import { Compartment, EditorState, type Extension } from '@codemirror/state'
+import { Compartment, EditorSelection, EditorState, type Extension } from '@codemirror/state'
 import {
   EditorView,
   drawSelection,
@@ -23,10 +23,11 @@ import {
   closeBracketsKeymap,
   completionKeymap
 } from '@codemirror/autocomplete'
-import { HighlightStyle, syntaxHighlighting } from '@codemirror/language'
+import { HighlightStyle, ensureSyntaxTree, syntaxTree, syntaxHighlighting } from '@codemirror/language'
 import { tags } from '@lezer/highlight'
+import type { SyntaxNode } from '@lezer/common'
 import type { ViewMode } from '@shared/types'
-import { livePreviewExtension } from './livePreview'
+import { livePreviewExtension, type LiveTheme } from './livePreview'
 
 export interface EditorHandlers {
   onChange(doc: string): void
@@ -36,6 +37,7 @@ export interface EditorHandlers {
 export interface EditorOptions {
   viewMode: ViewMode
   getDocPath: () => string | null
+  getTheme: () => LiveTheme
 }
 
 /** 就地渲染开关随显示模式切换，用 Compartment 热重配 */
@@ -43,7 +45,7 @@ export const livePreviewCompartment = new Compartment()
 
 export function livePreviewFor(options: EditorOptions): Extension {
   if (options.viewMode === 'split') return []
-  return livePreviewExtension(options.viewMode, options.getDocPath)
+  return livePreviewExtension(options.viewMode, options.getDocPath, options.getTheme)
 }
 
 const markdownHighlight = HighlightStyle.define([
@@ -124,6 +126,32 @@ const editorTheme = EditorView.theme({
   }
 })
 
+const CODE_BLOCK_RE = /^(?:FencedCode|CodeBlock|IndentedCode)$/
+
+/**
+ * 代码块行内的行首/行尾跳转。CM 默认的 End/Home 依赖几何测量
+ * （编辑区右边缘 + posAndSideAtCoords），就地渲染的块装饰与居中阅读栏
+ * 会让该点落到块外，把行边界算到下方的段落之后。这里直接按文档行取边界。
+ */
+function codeLineBoundary(view: EditorView, forward: boolean, extend = false): boolean {
+  const state = view.state
+  if (state.selection.ranges.length !== 1) return false
+  const range = state.selection.main
+  const tree = ensureSyntaxTree(state, range.head, 50) ?? syntaxTree(state)
+  let node: SyntaxNode | null = tree.resolveInner(range.head, 1)
+  while (node && !CODE_BLOCK_RE.test(node.name)) node = node.parent
+  if (!node) return false
+  const line = state.doc.lineAt(range.head)
+  const head = forward ? line.to : line.from
+  if (head === range.head) return false
+  view.dispatch({
+    selection: EditorSelection.range(extend ? range.anchor : head, head),
+    scrollIntoView: true,
+    userEvent: 'select'
+  })
+  return true
+}
+
 export function createEditorState(
   doc: string,
   handlers: EditorHandlers,
@@ -159,6 +187,10 @@ export function createEditorState(
         }
       ]),
       keymap.of([
+        { key: 'End', run: (view) => codeLineBoundary(view, true) },
+        { key: 'Shift-End', run: (view) => codeLineBoundary(view, true, true) },
+        { key: 'Home', run: (view) => codeLineBoundary(view, false) },
+        { key: 'Shift-Home', run: (view) => codeLineBoundary(view, false, true) },
         ...closeBracketsKeymap,
         ...defaultKeymap,
         ...searchKeymap,

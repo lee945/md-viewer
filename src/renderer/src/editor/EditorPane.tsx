@@ -71,12 +71,18 @@ export default function EditorPane({ onReady, onContent, onSave }: Props) {
   const filePath = useAppStore((s) => s.file?.path ?? null)
   const fileContent = useAppStore((s) => s.file?.content ?? null)
   const viewMode = useAppStore((s) => s.viewMode)
+  const preset = useAppStore((s) => s.preset)
+  const scheme = useAppStore((s) => s.theme)
   const setOutline = useAppStore((s) => s.setOutline)
   const setActiveId = useAppStore((s) => s.setActiveId)
 
   const editorOptions = (): EditorOptions => ({
     viewMode: useAppStore.getState().viewMode,
-    getDocPath: () => pathRef.current
+    getDocPath: () => pathRef.current,
+    getTheme: () => {
+      const state = useAppStore.getState()
+      return { preset: state.preset, scheme: state.theme }
+    }
   })
 
   const makeHandlers = (): EditorHandlers => ({
@@ -154,12 +160,10 @@ export default function EditorPane({ onReady, onContent, onSave }: Props) {
     const view = viewRef.current
     if (!view) return
     view.dispatch({
-      effects: livePreviewCompartment.reconfigure(
-        livePreviewFor({ viewMode, getDocPath: () => pathRef.current })
-      )
+      effects: livePreviewCompartment.reconfigure(livePreviewFor(editorOptions()))
     })
     view.requestMeasure()
-  }, [viewMode])
+  }, [viewMode, preset, scheme])
 
   useEffect(() => {
     if (!filePath || viewMode === 'split') return
@@ -251,6 +255,7 @@ export default function EditorPane({ onReady, onContent, onSave }: Props) {
       if (node.name === 'Autolink') {
         return doc.sliceString(node.from, node.to).replace(/^</, '').replace(/>$/, '')
       }
+      if (node.name === 'URL') return doc.sliceString(node.from, node.to)
       const url = node.getChild('URL')
       return url ? doc.sliceString(url.from, url.to) : null
     }
@@ -283,7 +288,11 @@ export default function EditorPane({ onReady, onContent, onSave }: Props) {
       const pos = view.posAtCoords({ x: event.clientX, y: event.clientY })
       if (pos == null) return
       let node: SyntaxNode | null = syntaxTree(view.state).resolveInner(pos, 1)
-      while (node && node.name !== 'Link' && node.name !== 'Autolink') node = node.parent
+      while (node && node.name !== 'Link' && node.name !== 'Autolink' && node.name !== 'URL') {
+        node = node.parent
+      }
+      // Link 内部的 URL 子节点走 Link 分支，避免重复处理
+      if (node?.name === 'URL' && node.parent?.name === 'Link') node = node.parent
       if (!node) return
       const href = hrefOf(node)
       if (!href) return

@@ -1,5 +1,5 @@
 import { ensureSyntaxTree, syntaxTree } from '@codemirror/language'
-import { StateField, type EditorState, type Range } from '@codemirror/state'
+import { StateEffect, StateField, type EditorState, type Range } from '@codemirror/state'
 import {
   Decoration,
   type DecorationSet,
@@ -8,9 +8,20 @@ import {
   type ViewUpdate,
   WidgetType
 } from '@codemirror/view'
+import type { SyntaxNode } from '@lezer/common'
+import type { ColorScheme } from '@shared/types'
+import type { ThemePreset } from '@shared/themes'
+import { md } from '@renderer/markdown/parser'
+import { ensureLanguages, highlightCode } from '@renderer/markdown/highlighter'
+import { sanitizeHtml } from '@renderer/markdown/sanitize'
 import { resolveRelative, toAssetUrl } from '@renderer/markdown/paths'
 
 export type LiveMode = 'ir' | 'wysiwyg'
+
+export interface LiveTheme {
+  preset: ThemePreset
+  scheme: ColorScheme
+}
 
 class BulletWidget extends WidgetType {
   toDOM(): HTMLElement {
@@ -131,12 +142,339 @@ class ImageBlockWidget extends WidgetType {
   }
 }
 
+/** 行内脚注引用标记 [^label] → 上标 */
+class FootnoteRefWidget extends WidgetType {
+  constructor(private readonly index: number) {
+    super()
+  }
+  eq(other: FootnoteRefWidget): boolean {
+    return other.index === this.index
+  }
+  toDOM(): HTMLElement {
+    const sup = document.createElement('sup')
+    sup.className = 'cm-md-fn-ref'
+    sup.textContent = `[${this.index}]`
+    return sup
+  }
+}
+
+function copyButton(code: string): HTMLButtonElement {
+  const btn = document.createElement('button')
+  btn.type = 'button'
+  btn.className = 'copy-btn'
+  btn.textContent = '复制'
+  btn.addEventListener('click', (event) => {
+    event.preventDefault()
+    event.stopPropagation()
+    void navigator.clipboard.writeText(code).then(() => {
+      btn.textContent = '已复制'
+      window.setTimeout(() => {
+        btn.textContent = '复制'
+      }, 1500)
+    })
+  })
+  return btn
+}
+
+/** 点击渲染块落光标进源码块内，块随即切换回源码形态（选中/编辑） */
+function revealOnMousedown(
+  wrap: HTMLElement,
+  view: EditorView,
+  pos: number,
+  keepInteractive: boolean
+): void {
+  wrap.addEventListener('mousedown', (event) => {
+    if (event.button !== 0) return
+    const target = event.target as HTMLElement
+    if (target.closest('.copy-btn')) return
+    // HTML 块内的原生交互元素（折叠面板、链接等）不拦截
+    if (keepInteractive && target.closest('summary, a, button, input, select, textarea, video, audio')) {
+      return
+    }
+    event.preventDefault()
+    view.dispatch({ selection: { anchor: pos }, scrollIntoView: true })
+    view.focus()
+  })
+}
+
+/** 代码块：Shiki 高亮 + 悬停复制按钮；高亮不可用时降级为普通代码块 */
+class CodeBlockWidget extends WidgetType {
+  constructor(
+    private readonly code: string,
+    private readonly html: string,
+    private readonly contentFrom: number,
+    private readonly firstContentLine: number,
+    private readonly lang: string,
+    private readonly fencePos: number | null
+  ) {
+    super()
+  }
+  eq(other: CodeBlockWidget): boolean {
+    return (
+      other.code === this.code &&
+      other.html === this.html &&
+      other.lang === this.lang &&
+      other.contentFrom === this.contentFrom &&
+      other.firstContentLine === this.firstContentLine &&
+      other.fencePos === this.fencePos
+    )
+  }
+  /** 按点击纵坐标估算落在第几行代码，返回切换后应落光标的文档位置 */
+  private targetFor(view: EditorView, wrap: HTMLElement, clientY: number): number {
+    const pre = wrap.querySelector('pre')
+    const codeEl = pre?.querySelector('code') ?? pre
+    const lines = this.code.split('\n').length
+    if (!pre || !codeEl || lines <= 0) return this.contentFrom
+    const rect = pre.getBoundingClientRect()
+    const style = getComputedStyle(codeEl)
+    const lineHeight = parseFloat(style.lineHeight)
+    const padTop = parseFloat(style.paddingTop) || 0
+    if (!lineHeight) return this.contentFrom
+    const index = Math.min(
+      Math.max(Math.floor((clientY - rect.top - padTop) / lineHeight), 0),
+      lines - 1
+    )
+    const doc = view.state.doc
+    const lineNumber = Math.min(this.firstContentLine + index, doc.lines)
+    return Math.max(doc.line(lineNumber).from, this.contentFrom)
+  }
+  toDOM(view: EditorView): HTMLElement {
+    const wrap = document.createElement('div')
+    wrap.className = 'cm-md-block cm-md-rendered markdown-body cm-md-codeblock'
+    const inner = document.createElement('div')
+    inner.className = 'code-wrap'
+    if (this.html) {
+      inner.innerHTML = this.html
+    } else {
+      const pre = document.createElement('pre')
+      const code = document.createElement('code')
+      code.textContent = this.code
+      pre.appendChild(code)
+      inner.appendChild(pre)
+    }
+    if (this.fencePos != null) {
+      // 语言标签：点击落到围栏行上，露出 ``` 行便于改语言
+      const tag = document.createElement('button')
+      tag.type = 'button'
+      tag.className = 'code-lang-tag'
+      tag.textContent = this.lang || '```'
+      tag.addEventListener('mousedown', (event) => {
+        event.preventDefault()
+        event.stopPropagation()
+        if (this.fencePos == null) return
+        view.dispatch({ selection: { anchor: this.fencePos }, scrollIntoView: true })
+        view.focus()
+      })
+      inner.appendChild(tag)
+    }
+    inner.appendChild(copyButton(this.code))
+    wrap.appendChild(inner)
+    wrap.addEventListener('mousedown', (event) => {
+      if (event.button !== 0) return
+      const target = event.target as HTMLElement
+      if (target.closest('.copy-btn, .code-lang-tag')) return
+      event.preventDefault()
+      const pos = this.targetFor(view, wrap, event.clientY)
+      view.dispatch({ selection: { anchor: pos }, scrollIntoView: true })
+      view.focus()
+    })
+    return wrap
+  }
+}
+
+/** 表格 / HTML 块 / 脚注定义：直接复用 markdown-it 的渲染结果与 .markdown-body 样式 */
+class RenderedHtmlWidget extends WidgetType {
+  constructor(
+    private readonly html: string,
+    private readonly revealPos: number,
+    private readonly interactive: boolean
+  ) {
+    super()
+  }
+  eq(other: RenderedHtmlWidget): boolean {
+    return other.html === this.html && other.interactive === this.interactive
+  }
+  toDOM(view: EditorView): HTMLElement {
+    const wrap = document.createElement('div')
+    wrap.className = 'cm-md-block cm-md-rendered markdown-body'
+    wrap.innerHTML = this.html
+    for (const img of Array.from(wrap.querySelectorAll('img'))) {
+      const remeasure = (): void => view.requestMeasure()
+      img.addEventListener('load', remeasure, { once: true })
+      img.addEventListener('error', remeasure, { once: true })
+    }
+    // 渲染块里的链接不能直接导航窗口：外链交给系统浏览器
+    wrap.addEventListener('click', (event) => {
+      const anchor = (event.target as HTMLElement).closest('a')
+      if (!anchor) return
+      event.preventDefault()
+      const href = anchor.getAttribute('href')
+      if (href && /^(https?:|mailto:|tel:)/i.test(href)) window.api.openExternal(href)
+    })
+    revealOnMousedown(wrap, view, this.revealPos, this.interactive)
+    return wrap
+  }
+}
+
 function resolveImage(src: string, docPath: string | null): string | null {
   if (!src) return null
   if (/^[a-zA-Z][\w+.-]*:/.test(src) || src.startsWith('//')) return src
   if (!docPath) return null
   const absolute = resolveRelative(docPath, src)
   return absolute ? toAssetUrl(absolute) : null
+}
+
+interface FootnoteDef {
+  label: string
+  index: number
+  from: number
+  to: number
+  content: string
+}
+
+let footnoteCache: { state: EditorState; list: FootnoteDef[] } | null = null
+
+/** 按行扫描脚注定义（[^label]: 内容，缩进行算作续行） */
+function footnotesOf(state: EditorState): FootnoteDef[] {
+  if (footnoteCache?.state === state) return footnoteCache.list
+  const doc = state.doc
+  const list: FootnoteDef[] = []
+  const seen = new Set<string>()
+  for (let n = 1; n <= doc.lines; n++) {
+    const line = doc.line(n)
+    const match = /^ {0,3}\[\^([^\]]+)\]:[ \t]?(.*)$/.exec(line.text)
+    if (!match) continue
+    const label = match[1].toLowerCase()
+    if (seen.has(label)) continue
+    seen.add(label)
+    const parts = [match[2]]
+    let end = n
+    while (end < doc.lines) {
+      const next = doc.line(end + 1).text
+      if (!/^(?: {4,}|\t)/.test(next)) break
+      parts.push(next.replace(/^(?: {4}|\t)/, ''))
+      end++
+    }
+    list.push({
+      label,
+      index: list.length + 1,
+      from: line.from,
+      to: doc.line(end).to,
+      content: parts.join('\n').trim()
+    })
+    n = end
+  }
+  footnoteCache = { state, list }
+  return list
+}
+
+const fragmentCache = new Map<string, string>()
+const FRAGMENT_CACHE_LIMIT = 200
+
+function renderFragment(source: string, docPath: string | null, inline = false): string {
+  const key = `${inline ? 'i' : 'b'}|${docPath ?? ''}|${source}`
+  const hit = fragmentCache.get(key)
+  if (hit !== undefined) return hit
+  let html = ''
+  try {
+    const env = { docPath: docPath ?? '' }
+    html = sanitizeHtml(inline ? md.renderInline(source, env) : md.render(source, env))
+  } catch {
+    html = ''
+  }
+  if (fragmentCache.size >= FRAGMENT_CACHE_LIMIT) fragmentCache.clear()
+  fragmentCache.set(key, html)
+  return html
+}
+
+const highlightCache = new Map<string, string>()
+const HIGHLIGHT_CACHE_LIMIT = 200
+
+function cachedHighlight(code: string, lang: string, theme: LiveTheme): string {
+  if (!code || !lang) return ''
+  const key = `${theme.preset}|${theme.scheme}|${lang}|${code}`
+  const hit = highlightCache.get(key)
+  if (hit !== undefined) return hit
+  const html = highlightCode(code, lang, theme.preset, theme.scheme)
+  if (!html) return '' // 语言尚未加载完成，不缓存，等 refresh 后重试
+  const safe = sanitizeHtml(html)
+  if (highlightCache.size >= HIGHLIGHT_CACHE_LIMIT) highlightCache.clear()
+  highlightCache.set(key, safe)
+  return safe
+}
+
+/** 去掉行首的引用标记（支持嵌套），代码内容在引用内需要还原 */
+function stripQuoteMarks(line: string): string {
+  return line.replace(/^(?:[ \t]*>[ \t]?)+/, '')
+}
+
+/** 行首连续的 > 标记层数 */
+function quoteDepth(text: string): number {
+  let depth = 0
+  let rest = text
+  let match: RegExpExecArray | null
+  while ((match = /^[ \t]*>/.exec(rest))) {
+    depth++
+    rest = rest.slice(match[0].length).replace(/^ /, '')
+  }
+  return depth
+}
+
+function fencedCode(state: EditorState, child: SyntaxNode): { code: string; lang: string } {
+  const doc = state.doc
+  const info = child.getChild('CodeInfo')
+  const lang = info ? doc.sliceString(info.from, info.to).trim() : ''
+  const marks = child.getChildren('CodeMark')
+  const first = marks[0]
+  if (!first) return { code: doc.sliceString(child.from, child.to), lang }
+  const last = marks.length >= 2 ? marks[marks.length - 1] : null
+  const openLine = doc.lineAt(first.from)
+  const openText = stripQuoteMarks(openLine.text)
+  const indent = openText.match(/^[ \t]*/)?.[0].length ?? 0
+  const endLine = last ? doc.lineAt(last.from).number - 1 : doc.lineAt(child.to).number
+  const lines: string[] = []
+  for (let n = openLine.number + 1; n <= endLine; n++) {
+    let text = stripQuoteMarks(doc.line(n).text)
+    let cut = 0
+    while (cut < indent && (text[cut] === ' ' || text[cut] === '\t')) cut++
+    lines.push(text.slice(cut))
+  }
+  while (lines.length > 0 && lines[lines.length - 1] === '') lines.pop()
+  return { code: lines.join('\n'), lang }
+}
+
+function indentedCode(state: EditorState, child: SyntaxNode): string {
+  const doc = state.doc
+  const start = doc.lineAt(child.from).number
+  const end = doc.lineAt(child.to).number
+  const lines: string[] = []
+  for (let n = start; n <= end; n++) {
+    const text = stripQuoteMarks(doc.line(n).text).replace(/^(?: {4}|\t)/, '')
+    lines.push(text)
+  }
+  while (lines.length > 0 && lines[lines.length - 1] === '') lines.pop()
+  return lines.join('\n')
+}
+
+const VOID_TAGS = /^(?:br|hr|img|input|meta|link|source|track|area|base|col|embed|param|wbr)$/
+
+/** HTML 块会被空行切断（如 details 内的段落），按首尾标签把整段并成一个渲染区域 */
+function htmlRegion(state: EditorState, child: SyntaxNode): { from: number; to: number } {
+  const doc = state.doc
+  const firstLine = doc.lineAt(child.from)
+  const raw = doc.sliceString(child.from, child.to)
+  const open = /^[ \t]*<([a-zA-Z][\w-]*)\b/.exec(firstLine.text)
+  if (!open) return { from: child.from, to: child.to }
+  const tag = open[1].toLowerCase()
+  if (VOID_TAGS.test(tag)) return { from: child.from, to: child.to }
+  if (new RegExp(`</${tag}\\s*>`, 'i').test(raw)) return { from: child.from, to: child.to }
+  const closeRe = new RegExp(`^\\s*</${tag}\\s*>\\s*$`, 'i')
+  const fromLine = doc.lineAt(child.to).number + 1
+  const lastLine = Math.min(doc.lines, fromLine + 200)
+  for (let n = fromLine; n <= lastLine; n++) {
+    if (closeRe.test(doc.line(n).text)) return { from: child.from, to: doc.line(n).to }
+  }
+  return { from: child.from, to: child.to }
 }
 
 function buildDecorations(
@@ -170,6 +508,15 @@ function buildDecorations(
 
   const quoteLines = new Set<number>()
 
+  /** 行内 HTML 成对标签 → 隐藏标签文本并给内容套样式（仅常见排版标签） */
+  const INLINE_HTML_CLASS: Record<string, string> = {
+    kbd: 'cm-md-html-kbd',
+    mark: 'cm-md-html-mark',
+    sub: 'cm-md-html-sub',
+    sup: 'cm-md-html-sup'
+  }
+  const htmlStack: { tag: string; from: number; to: number }[] = []
+
   const lineDeco = (pos: number, cls: string): void => {
     ranges.push(Decoration.line({ class: cls }).range(doc.lineAt(pos).from))
   }
@@ -183,6 +530,9 @@ function buildDecorations(
     if (!hideAllowed(pos)) return
     for (const mark of marks) hide(mark.from, mark.to)
   }
+
+  const footnoteIndex = new Map<string, number>()
+  for (const def of footnotesOf(state)) footnoteIndex.set(def.label, def.index)
 
   syntaxTree(state).iterate({
     from: view.viewport.from,
@@ -212,16 +562,17 @@ function buildDecorations(
         return
       }
 
-      if (name === 'Blockquote') {
-        for (const mark of child.getChildren('QuoteMark')) {
-          const lineFrom = doc.lineAt(mark.from).from
-          if (!quoteLines.has(lineFrom)) {
-            quoteLines.add(lineFrom)
-            lineDeco(mark.from, 'cm-md-quote')
-          }
-          if (hideAllowed(mark.from)) hide(mark.from, mark.to)
+      if (name === 'QuoteMark') {
+        // QuoteMark 可能直接挂在 Blockquote 下，也可能嵌在列表项里（引用续行）；
+        // 代码块内的 QuoteMark 因 FencedCode/CodeBlock 分支提前 return false 而不会被访问到
+        const lineFrom = doc.lineAt(node.from).from
+        if (!quoteLines.has(lineFrom)) {
+          quoteLines.add(lineFrom)
+          const depth = quoteDepth(doc.lineAt(node.from).text)
+          lineDeco(node.from, depth > 1 ? 'cm-md-quote cm-md-quote-d2' : 'cm-md-quote')
         }
-        return
+        if (hideAllowed(node.from)) hide(node.from, node.to)
+        return false
       }
 
       if (name === 'ListMark') {
@@ -246,6 +597,34 @@ function buildDecorations(
               widget: new CheckboxWidget(checked, node.from, node.to)
             }).range(node.from, node.to)
           )
+        }
+        return false
+      }
+
+      if (name === 'HTMLTag') {
+        const text = doc.sliceString(node.from, node.to)
+        const open = /^<([a-zA-Z][a-zA-Z0-9-]*)\s*>$/.exec(text)
+        const close = /^<\/([a-zA-Z][a-zA-Z0-9-]*)\s*>$/.exec(text)
+        if (open) {
+          const tag = open[1].toLowerCase()
+          if (INLINE_HTML_CLASS[tag]) htmlStack.push({ tag, from: node.from, to: node.to })
+        } else if (close) {
+          const tag = close[1].toLowerCase()
+          const idx = htmlStack.map((item) => item.tag).lastIndexOf(tag)
+          if (idx >= 0 && INLINE_HTML_CLASS[tag]) {
+            const opener = htmlStack[idx]
+            htmlStack.length = idx
+            if (hideAllowed(opener.from)) {
+              // 不用 hide()，避免吞掉闭合标签后的空格
+              if (opener.from < opener.to) {
+                ranges.push(Decoration.replace({}).range(opener.from, opener.to))
+              }
+              if (node.from < node.to) {
+                ranges.push(Decoration.replace({}).range(node.from, node.to))
+              }
+              markDeco(opener.to, node.from, INLINE_HTML_CLASS[tag])
+            }
+          }
         }
         return false
       }
@@ -288,6 +667,26 @@ function buildDecorations(
       }
 
       if (name === 'Link') {
+        const text = doc.sliceString(node.from, node.to)
+        // 脚注引用 [^label] 在 lezer 里会被解析成 Link，这里换成上标标记
+        if (text.startsWith('[^')) {
+          if (hideAllowed(node.from)) {
+            const re = /\[\^([^\]]+)\]/g
+            let match: RegExpExecArray | null
+            while ((match = re.exec(text))) {
+              const index = footnoteIndex.get(match[1].toLowerCase())
+              if (!index) continue
+              const from = node.from + match.index
+              ranges.push(
+                Decoration.replace({ widget: new FootnoteRefWidget(index) }).range(
+                  from,
+                  from + match[0].length
+                )
+              )
+            }
+          }
+          return false
+        }
         const marks = child.getChildren('LinkMark')
         const url = child.getChild('URL')
         const linkTitle = child.getChild('LinkTitle')
@@ -306,6 +705,12 @@ function buildDecorations(
       if (name === 'Autolink') {
         const marks = child.getChildren('LinkMark')
         hideMarks(marks, node.from)
+        markDeco(node.from, node.to, 'cm-md-link')
+        return false
+      }
+
+      // GFM 裸链接（https://… 直接书写）
+      if (name === 'URL') {
         markDeco(node.from, node.to, 'cm-md-link')
         return false
       }
@@ -341,48 +746,25 @@ function buildDecorations(
   return Decoration.set(ranges, true)
 }
 
-/** 就地渲染：ir 模式当前行显示源码标记，wysiwyg 模式标记恒隐藏 */
-export function livePreviewExtension(mode: LiveMode, getDocPath: () => string | null) {
-  const inline = ViewPlugin.fromClass(
-    class {
-      decorations: DecorationSet
-      constructor(view: EditorView) {
-        this.decorations = buildDecorations(view, mode, getDocPath())
-      }
-      update(update: ViewUpdate) {
-        if (update.docChanged || update.selectionSet || update.viewportChanged) {
-          this.decorations = buildDecorations(update.view, mode, getDocPath())
-        }
-      }
-    },
-    { decorations: (plugin) => plugin.decorations }
-  )
-  return [blockPreviewField(mode, getDocPath), inline]
+const REFRESH_BLOCKS = StateEffect.define<null>()
+
+const FENCE_LANG_RE = /^ {0,3}(?:`{3,}|~{3,})[ \t]*([\w#+.-]+)?/gm
+
+function fenceLanguages(source: string): string[] {
+  const langs: string[] = []
+  for (const match of source.matchAll(FENCE_LANG_RE)) {
+    if (match[1]) langs.push(match[1])
+  }
+  return langs
 }
 
-/**
- * 光标所在图片行下方的块级图片预览。
- * 块级装饰不允许由 ViewPlugin 提供（CodeMirror 限制），所以单独放在 StateField 里。
- */
-function blockPreviewField(mode: LiveMode, getDocPath: () => string | null) {
-  return StateField.define<DecorationSet>({
-    create: (state) => buildBlockPreviews(state, mode, getDocPath()),
-    update: (deco, tr) => {
-      if (tr.docChanged || tr.selection) return buildBlockPreviews(tr.state, mode, getDocPath())
-      return deco.map(tr.changes)
-    },
-    provide: (field) => EditorView.decorations.from(field)
-  })
-}
-
-function buildBlockPreviews(
+/** 光标在图片行时，行下方的块级图片预览（块级装饰只能由 StateField 提供） */
+function addImagePreviews(
   state: EditorState,
-  mode: LiveMode,
-  docPath: string | null
-): DecorationSet {
-  if (mode !== 'ir') return Decoration.none
+  docPath: string | null,
+  ranges: Range<Decoration>[]
+): void {
   const doc = state.doc
-  const ranges: Range<Decoration>[] = []
   const seen = new Set<number>()
   for (const range of state.selection.ranges) {
     const line = doc.lineAt(range.from)
@@ -406,11 +788,231 @@ function buildBlockPreviews(
             widget: new ImageBlockWidget(src, alt),
             block: true,
             side: 1
-          }).range(doc.lineAt(node.from).to)
+          }).range(line.to)
         )
         return false
       }
     })
   }
+}
+
+/** 块级渲染：代码块/表格/HTML 块/脚注定义在非源码态隐藏原文、显示渲染结果 */
+function buildRenderedBlocks(
+  state: EditorState,
+  mode: LiveMode,
+  getDocPath: () => string | null,
+  getTheme: () => LiveTheme
+): DecorationSet {
+  const doc = state.doc
+  const ranges: Range<Decoration>[] = []
+  const theme = getTheme()
+  const docPath = getDocPath()
+  const selection = state.selection.ranges
+  const revealed = (from: number, to: number): boolean =>
+    selection.some((range) => range.from <= to && range.to >= from)
+  const hidden = new Set<number>()
+
+  const hideLine = (lineNumber: number): void => {
+    const line = doc.line(lineNumber)
+    if (hidden.has(line.from)) return
+    hidden.add(line.from)
+    ranges.push(Decoration.line({ class: 'cm-md-block-hidden' }).range(line.from))
+  }
+
+  const addBlock = (from: number, to: number, widget: WidgetType): void => {
+    if (revealed(from, to)) return
+    const first = doc.lineAt(from).number
+    const last = doc.lineAt(to).number
+    for (let n = first; n <= last; n++) hideLine(n)
+    ranges.push(Decoration.widget({ widget, block: true, side: 1 }).range(to))
+  }
+
+  /** 代码块编辑态：源码行保留为可编辑文本，按代码块样式呈现 */
+  const addCodeSource = (first: number, last: number, fences?: Set<number>): void => {
+    for (let n = first; n <= last; n++) {
+      const line = doc.line(n)
+      let cls = 'cm-md-codeblock-src'
+      if (fences?.has(n)) cls += ' cm-md-codeblock-fence'
+      if (n === first) cls += ' cm-md-codeblock-first'
+      if (n === last) cls += ' cm-md-codeblock-last'
+      const depth = quoteDepth(line.text)
+      if (depth > 0) cls += depth > 1 ? ' cm-md-quote cm-md-quote-d2' : ' cm-md-quote'
+      ranges.push(Decoration.line({ class: cls }).range(line.from))
+      const prefix = line.text.match(/^(?:[ \t]*>[ \t]?)+/)?.[0].length ?? 0
+      if (prefix > 0) ranges.push(Decoration.replace({}).range(line.from, line.from + prefix))
+    }
+  }
+
+  const tree = ensureSyntaxTree(state, doc.length, 150) ?? syntaxTree(state)
+  let coveredTo = 0
+  tree.iterate({
+    enter: (node) => {
+      const name = node.name
+      if (name === 'FencedCode' || name === 'CodeBlock' || name === 'IndentedCode') {
+        const from = doc.lineAt(node.from).from
+        const to = doc.lineAt(node.to).to
+        const { code, lang } =
+          name === 'FencedCode'
+            ? fencedCode(state, node.node)
+            : { code: indentedCode(state, node.node), lang: '' }
+        if (name === 'FencedCode') {
+          const marks = node.node.getChildren('CodeMark')
+          const openLine = marks.length > 0 ? doc.lineAt(marks[0].from) : null
+          const closeLine =
+            marks.length >= 2 ? doc.lineAt(marks[marks.length - 1].from) : null
+          const firstContent = openLine ? openLine.number + 1 : doc.lineAt(node.from).number
+          const lastContent = closeLine ? closeLine.number - 1 : doc.lineAt(node.to).number
+          if (revealed(from, to)) {
+            // 光标在块内：围栏行与内容行都保留为可编辑文本（围栏行暗色小字）。
+            // 不能隐藏围栏行——display:none 的隐藏行紧邻可编辑行时，
+            // Chromium 原生的光标几何计算会错乱（End/上下键跳到块外，输入越出围栏）
+            const fences = new Set<number>()
+            if (openLine) fences.add(openLine.number)
+            if (closeLine) fences.add(closeLine.number)
+            const lastLine = closeLine ? closeLine.number : doc.lineAt(node.to).number
+            const firstLine = openLine ? openLine.number : doc.lineAt(node.from).number
+            addCodeSource(firstLine, lastLine, fences)
+            return false
+          }
+          const contentFrom =
+            firstContent <= lastContent ? doc.line(firstContent).from : (openLine?.to ?? from)
+          addBlock(
+            from,
+            to,
+            new CodeBlockWidget(
+              code,
+              cachedHighlight(code, lang, theme),
+              contentFrom,
+              firstContent,
+              lang,
+              openLine ? openLine.to : null
+            )
+          )
+          return false
+        }
+        if (revealed(from, to)) {
+          addCodeSource(doc.lineAt(node.from).number, doc.lineAt(node.to).number)
+          return false
+        }
+        addBlock(
+          from,
+          to,
+          new CodeBlockWidget(
+            code,
+            cachedHighlight(code, lang, theme),
+            from,
+            doc.lineAt(node.from).number,
+            '',
+            null
+          )
+        )
+        return false
+      }
+
+      if (name === 'Table') {
+        const from = doc.lineAt(node.from).from
+        const to = doc.lineAt(node.to).to
+        const html = renderFragment(doc.sliceString(from, to), docPath)
+        if (html.replace(/\s+/g, '')) {
+          addBlock(from, to, new RenderedHtmlWidget(html, Math.min(from + 1, to), false))
+        }
+        return false
+      }
+
+      if (name === 'HTMLBlock') {
+        if (node.from < coveredTo) return false
+        const region = htmlRegion(state, node.node)
+        if (region.from < coveredTo) return false
+        coveredTo = region.to
+        const from = doc.lineAt(region.from).from
+        const to = doc.lineAt(region.to).to
+        const html = renderFragment(doc.sliceString(from, to), docPath)
+        if (html.replace(/\s+/g, '')) {
+          addBlock(from, to, new RenderedHtmlWidget(html, Math.min(from + 1, to), true))
+        }
+        return false
+      }
+
+      return
+    }
+  })
+
+  for (const def of footnotesOf(state)) {
+    const body = renderFragment(def.content, docPath, true)
+    const html = `<div class="cm-md-fn-def"><span class="fn-label">[${def.index}]</span><span class="fn-body">${body}</span></div>`
+    addBlock(def.from, def.to, new RenderedHtmlWidget(html, Math.min(def.from + 1, def.to), false))
+  }
+
+  if (mode === 'ir') addImagePreviews(state, docPath, ranges)
+
   return Decoration.set(ranges, true)
+}
+
+function renderedBlocksField(mode: LiveMode, getDocPath: () => string | null, getTheme: () => LiveTheme) {
+  return StateField.define<DecorationSet>({
+    create: (state) => buildRenderedBlocks(state, mode, getDocPath, getTheme),
+    update: (deco, tr) => {
+      if (tr.docChanged || tr.selection || tr.effects.some((effect) => effect.is(REFRESH_BLOCKS))) {
+        return buildRenderedBlocks(tr.state, mode, getDocPath, getTheme)
+      }
+      return deco.map(tr.changes)
+    },
+    provide: (field) => EditorView.decorations.from(field)
+  })
+}
+
+/** 就地渲染：ir 模式当前行显示源码标记，wysiwyg 模式标记恒隐藏 */
+export function livePreviewExtension(
+  mode: LiveMode,
+  getDocPath: () => string | null,
+  getTheme: () => LiveTheme
+) {
+  const blocks = renderedBlocksField(mode, getDocPath, getTheme)
+  const inline = ViewPlugin.fromClass(
+    class {
+      decorations: DecorationSet
+      private langSig: string
+      private timer = 0
+
+      constructor(view: EditorView) {
+        this.decorations = buildDecorations(view, mode, getDocPath())
+        this.langSig = fenceLanguages(view.state.doc.toString()).join(',')
+        this.schedule(view, 0)
+      }
+
+      update(update: ViewUpdate) {
+        if (update.docChanged || update.selectionSet || update.viewportChanged) {
+          this.decorations = buildDecorations(update.view, mode, getDocPath())
+        }
+        if (update.docChanged) {
+          const sig = fenceLanguages(update.state.doc.toString()).join(',')
+          if (sig !== this.langSig) {
+            this.langSig = sig
+            this.schedule(update.view, 0)
+          }
+        }
+      }
+
+      // 语法树/Shiki 语言是异步就绪的：补齐后触发块级装饰重建
+      schedule(view: EditorView, attempt: number): void {
+        if (this.timer) window.clearTimeout(this.timer)
+        this.timer = window.setTimeout(() => {
+          this.timer = 0
+          if (!view.dom.isConnected) return
+          const tree = ensureSyntaxTree(view.state, view.state.doc.length, 300)
+          const langs = fenceLanguages(view.state.doc.toString())
+          const refresh = (): void => {
+            if (view.dom.isConnected) view.dispatch({ effects: REFRESH_BLOCKS.of(null) })
+          }
+          if (langs.length > 0) void ensureLanguages(langs).then(refresh)
+          else refresh()
+          if (!tree && attempt < 8) {
+            this.timer = window.setTimeout(() => this.schedule(view, attempt + 1), 250)
+          }
+        }, 30)
+      }
+    },
+    { decorations: (plugin) => plugin.decorations }
+  )
+  return [blocks, inline]
 }
