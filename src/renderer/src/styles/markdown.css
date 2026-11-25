@@ -145,6 +145,13 @@
   cursor: zoom-in;
 }
 
+/* 独占一段的图片居中显示 */
+.markdown-body p > img:only-child,
+.markdown-body p > a:only-child > img {
+  display: block;
+  margin: 1em auto;
+}
+
 .code-wrap {
   position: relative;
   margin: 0 0 1em;
