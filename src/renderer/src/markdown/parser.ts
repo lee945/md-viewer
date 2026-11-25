@@ -61,6 +61,20 @@ export function createParser(): InstanceType<typeof MarkdownIt> {
     }
   }
 
+  // 表格外包一层横向滚动容器：table 自身保持 display:table，
+  // 否则 thead/tbody 会各自成为匿名表格，表头与表体之间出现空隙
+  const defaultTableOpen =
+    md.renderer.rules.table_open ??
+    ((tokens, idx, options, _env, self) => self.renderToken(tokens, idx, options))
+  const defaultTableClose =
+    md.renderer.rules.table_close ??
+    ((tokens, idx, options, _env, self) => self.renderToken(tokens, idx, options))
+
+  md.renderer.rules.table_open = (tokens, idx, options, env, self) =>
+    `<div class="table-wrap">${defaultTableOpen(tokens, idx, options, env, self)}`
+  md.renderer.rules.table_close = (tokens, idx, options, env, self) =>
+    `${defaultTableClose(tokens, idx, options, env, self)}</div>`
+
   const defaultImage =
     md.renderer.rules.image ??
     ((tokens, idx, options, _env, self) => self.renderToken(tokens, idx, options))

@@ -1,7 +1,6 @@
 import { Compartment, EditorSelection, EditorState, type Extension } from '@codemirror/state'
 import {
   EditorView,
-  drawSelection,
   dropCursor,
   highlightActiveLine,
   highlightActiveLineGutter,
@@ -91,11 +90,10 @@ const editorTheme = EditorView.theme({
   // 源码显示状态除外——铺实底会盖住文字选区
   '.cm-activeLine.cm-md-image-line:not(.cm-md-image-src)': { backgroundColor: 'var(--bg)' },
   '.cm-activeLineGutter': { backgroundColor: 'var(--bg-hover)', color: 'var(--text)' },
-  // 选择器与 CodeMirror 默认焦点态同结构同特异性，确保覆盖默认浅紫选区色
-  '&.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection':
-    {
-      backgroundColor: 'color-mix(in srgb, var(--accent) 55%, transparent)'
-    },
+  // 原生选区色（未启用 drawSelection，选区由浏览器绘制）
+  '.cm-content ::selection': {
+    backgroundColor: 'color-mix(in srgb, var(--accent) 55%, transparent)'
+  },
   '.cm-cursor, .cm-dropCursor': { borderLeftColor: 'var(--accent)' },
   '.cm-panels': { backgroundColor: 'var(--bg-elevated)', color: 'var(--text)' },
   '.cm-panels.cm-panels-top': { borderBottom: '1px solid var(--border)' },
@@ -164,7 +162,6 @@ export function createEditorState(
       highlightActiveLineGutter(),
       highlightActiveLine(),
       history(),
-      drawSelection(),
       dropCursor(),
       rectangularSelection(),
       closeBrackets(),

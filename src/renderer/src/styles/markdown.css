@@ -145,10 +145,13 @@
   border: 0;
 }
 
-.markdown-body table {
-  display: block;
+.markdown-body .table-wrap {
   max-width: 100%;
   overflow-x: auto;
+}
+
+.markdown-body table {
+  max-width: 100%;
   border-collapse: collapse;
 }
 

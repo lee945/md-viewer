@@ -1,5 +1,5 @@
 import { ensureSyntaxTree, syntaxTree } from '@codemirror/language'
-import { StateEffect, StateField, type EditorState, type Range } from '@codemirror/state'
+import { StateEffect, StateField, EditorSelection, type EditorState, type Range } from '@codemirror/state'
 import {
   Decoration,
   type DecorationSet,
@@ -158,15 +158,17 @@ class FootnoteRefWidget extends WidgetType {
   }
 }
 
-function copyButton(code: string): HTMLButtonElement {
+function copyButton(getText: () => string): HTMLButtonElement {
   const btn = document.createElement('button')
   btn.type = 'button'
   btn.className = 'copy-btn'
   btn.textContent = '复制'
+  // 不抢走可编辑代码块的焦点：失焦写回会重建组件，click 来不及触发
+  btn.addEventListener('mousedown', (event) => event.preventDefault())
   btn.addEventListener('click', (event) => {
     event.preventDefault()
     event.stopPropagation()
-    void navigator.clipboard.writeText(code).then(() => {
+    void navigator.clipboard.writeText(getText()).then(() => {
       btn.textContent = '已复制'
       window.setTimeout(() => {
         btn.textContent = '复制'
@@ -197,26 +199,36 @@ function revealOnMousedown(
   })
 }
 
-/** 代码块：Shiki 高亮 + 悬停复制按钮；高亮不可用时降级为普通代码块 */
+/**
+ * 代码块：Shiki 高亮 + 就地编辑（Typora 式）。
+ * 渲染态普通点击/拖选走原生选区（可部分选中、就地改字），失焦写回源码；
+ * Ctrl/Cmd+点击回到源码态改围栏/语言。
+ */
 class CodeBlockWidget extends WidgetType {
+  private wrap: HTMLElement | null = null
   constructor(
     private readonly code: string,
     private readonly html: string,
     private readonly contentFrom: number,
     private readonly firstContentLine: number,
     private readonly lang: string,
-    private readonly fencePos: number | null
+    // 整块文档范围与原始源码：写回前校验位置有效，序列化沿用原围栏/引用/缩进
+    private readonly from: number,
+    private readonly to: number,
+    private readonly source: string,
+    private readonly rebuild: (code: string) => string
   ) {
     super()
   }
   eq(other: CodeBlockWidget): boolean {
+    // 位置必须比较：文档上方有增删时旧组件的位置会失效，写回会落错地方
     return (
       other.code === this.code &&
       other.html === this.html &&
       other.lang === this.lang &&
-      other.contentFrom === this.contentFrom &&
-      other.firstContentLine === this.firstContentLine &&
-      other.fencePos === this.fencePos
+      other.from === this.from &&
+      other.to === this.to &&
+      other.source === this.source
     )
   }
   /** 按点击纵坐标估算落在第几行代码，返回切换后应落光标的文档位置 */
@@ -238,9 +250,40 @@ class CodeBlockWidget extends WidgetType {
     const lineNumber = Math.min(this.firstContentLine + index, doc.lines)
     return Math.max(doc.line(lineNumber).from, this.contentFrom)
   }
+  /** 编辑中的文本：浏览器可能插入 <br> 或用块级元素表示换行，统一还原为 \n */
+  private static editableText(pre: HTMLElement): string {
+    let out = ''
+    const walk = (node: Node): void => {
+      if (node.nodeType === Node.TEXT_NODE) {
+        out += node.nodeValue ?? ''
+        return
+      }
+      if (node.nodeType !== Node.ELEMENT_NODE) return
+      const el = node as HTMLElement
+      if (el.tagName === 'BR') {
+        out += '\n'
+        return
+      }
+      const block = /^(?:DIV|P)$/.test(el.tagName) && out !== '' && !out.endsWith('\n')
+      if (block) out += '\n'
+      for (const child of Array.from(el.childNodes)) walk(child)
+    }
+    for (const child of Array.from(pre.childNodes)) walk(child)
+    return out
+  }
+  private commit(view: EditorView): void {
+    const pre = this.wrap?.querySelector('pre')
+    if (!pre || this.to > view.state.doc.length) return
+    // 编辑期间文档若被外部改动，位置可能已失效，禁止盲写
+    if (view.state.doc.sliceString(this.from, this.to) !== this.source) return
+    const next = this.rebuild(CodeBlockWidget.editableText(pre))
+    if (next === this.source) return
+    view.dispatch({ changes: { from: this.from, to: this.to, insert: next } })
+  }
   toDOM(view: EditorView): HTMLElement {
     const wrap = document.createElement('div')
     wrap.className = 'cm-md-block cm-md-rendered markdown-body cm-md-codeblock'
+    this.wrap = wrap
     const inner = document.createElement('div')
     inner.className = 'code-wrap'
     if (this.html) {
@@ -252,28 +295,45 @@ class CodeBlockWidget extends WidgetType {
       pre.appendChild(code)
       inner.appendChild(pre)
     }
-    if (this.fencePos != null) {
-      // 语言标签：点击落到围栏行上，露出 ``` 行便于改语言
-      const tag = document.createElement('button')
-      tag.type = 'button'
+    const pre = inner.querySelector('pre')
+    if (pre) {
+      pre.setAttribute('contenteditable', 'plaintext-only')
+      pre.spellcheck = false
+      // 行数变化时让 CM 重新量高，避免编辑中的代码盖住下方内容
+      pre.addEventListener('input', () => view.requestMeasure())
+    }
+    if (this.lang) {
+      // 语言标签只作提示：不接收指针事件，避免长语言名盖住首行代码的点击。
+      // 需要改语言时 Ctrl/Cmd+点击进入源码态改围栏行。
+      const tag = document.createElement('span')
       tag.className = 'code-lang-tag'
-      tag.textContent = this.lang || '```'
-      tag.addEventListener('mousedown', (event) => {
-        event.preventDefault()
-        event.stopPropagation()
-        if (this.fencePos == null) return
-        view.dispatch({ selection: { anchor: this.fencePos }, scrollIntoView: true })
-        view.focus()
-      })
+      tag.textContent = this.lang
       inner.appendChild(tag)
     }
-    inner.appendChild(copyButton(this.code))
+    inner.appendChild(copyButton(() => pre?.textContent ?? this.code))
     wrap.appendChild(inner)
-    wrap.addEventListener('mousedown', (event) => {
-      if (event.button !== 0) return
-      const target = event.target as HTMLElement
-      if (target.closest('.copy-btn, .code-lang-tag')) return
+    wrap.addEventListener('focusout', (event) => {
+      const next = event.relatedTarget as Node | null
+      if (next && wrap.contains(next)) return
+      this.commit(view)
+    })
+    wrap.addEventListener('keydown', (event) => {
+      if (event.isComposing) return
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        ;(document.activeElement as HTMLElement | null)?.blur()
+        return
+      }
+      if ((event.ctrlKey || event.metaKey) && !event.shiftKey && event.key.toLowerCase() === 's') {
+        // 同步写回，让随后的 window 级 Ctrl+S 保存到最新内容（此处不阻断事件）
+        this.commit(view)
+      }
+    })
+    // 普通点击/拖选交给原生（可部分选中）；Ctrl/Cmd+点击回退源码态
+    wrap.addEventListener('click', (event) => {
+      if (!event.ctrlKey && !event.metaKey) return
       event.preventDefault()
+      event.stopPropagation()
       const pos = this.targetFor(view, wrap, event.clientY)
       view.dispatch({ selection: { anchor: pos }, scrollIntoView: true })
       view.focus()
@@ -312,6 +372,254 @@ class RenderedHtmlWidget extends WidgetType {
       if (href && /^(https?:|mailto:|tel:)/i.test(href)) window.api.openExternal(href)
     })
     revealOnMousedown(wrap, view, this.revealPos, this.interactive)
+    return wrap
+  }
+}
+
+/** 单元格内联 DOM → Markdown，保留常见行内格式 */
+function inlineToMd(node: Node): string {
+  if (node.nodeType === Node.TEXT_NODE) {
+    return (node.nodeValue ?? '').replace(/\|/g, '\\|').replace(/\s+/g, ' ')
+  }
+  if (node.nodeType !== Node.ELEMENT_NODE) return ''
+  const el = node as HTMLElement
+  const inner = Array.from(el.childNodes).map(inlineToMd).join('')
+  switch (el.tagName) {
+    case 'STRONG':
+    case 'B':
+      return inner.trim() ? `**${inner.trim()}**` : inner
+    case 'EM':
+    case 'I':
+      return inner.trim() ? `*${inner.trim()}*` : inner
+    case 'DEL':
+    case 'S':
+    case 'STRIKE':
+      return inner.trim() ? `~~${inner.trim()}~~` : inner
+    case 'CODE':
+      return `\`${(el.textContent ?? '').replace(/\|/g, '\\|')}\``
+    case 'BR':
+      return '<br>'
+    case 'A': {
+      const href = el.getAttribute('href') ?? ''
+      return `[${inner.trim() || href}](${href})`
+    }
+    case 'IMG':
+      return `![${el.getAttribute('alt') ?? ''}](${el.getAttribute('src') ?? ''})`
+    case 'SUB':
+      return `<sub>${inner}</sub>`
+    case 'SUP':
+      return `<sup>${inner}</sup>`
+    case 'MARK':
+      return `<mark>${inner}</mark>`
+    case 'KBD':
+      return `<kbd>${inner}</kbd>`
+    default:
+      return inner
+  }
+}
+
+/** 从源码分隔行解析对齐标记，序列化时沿用 */
+function tableAligns(source: string): string[] {
+  const delim = source.split('\n')[1]?.trim()
+  if (!delim || !delim.includes('-')) return []
+  return delim
+    .replace(/^\|/, '')
+    .replace(/\|$/, '')
+    .split('|')
+    .map((cell) => {
+      const text = cell.trim()
+      const left = text.startsWith(':')
+      const right = text.endsWith(':')
+      return left && right ? ':---:' : right ? '---:' : left ? ':---' : '---'
+    })
+}
+
+function cellMarkdown(cell: HTMLTableCellElement): string {
+  return Array.from(cell.childNodes)
+    .map(inlineToMd)
+    .join('')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+/** DOM 表格 → Markdown 源码，列数与对齐方式沿用原源码 */
+function tableToMarkdown(table: HTMLTableElement, source: string): string {
+  const rows = Array.from(table.rows).map((row) =>
+    Array.from(row.cells).map((cell) => cellMarkdown(cell as HTMLTableCellElement))
+  )
+  if (rows.length === 0) return source
+  const aligns = tableAligns(source)
+  const cols = Math.max(aligns.length, ...rows.map((row) => row.length), 1)
+  const fit = (cells: string[]): string[] => {
+    const out = cells.slice(0, cols)
+    while (out.length < cols) out.push('')
+    return out
+  }
+  const line = (cells: string[]): string => `| ${cells.join(' | ')} |`
+  const separator = fit(aligns.length ? aligns : new Array(cols).fill('---'))
+  const body = rows.slice(1).map(fit)
+  return [line(fit(rows[0])), line(separator), ...body.map(line)].join('\n')
+}
+
+/**
+ * 渲染表格里拖选的单元格 → Markdown 片段（表头 + 分隔行 + 选中的行/列）。
+ * 整表选中时直接用 DOM 序列化整表；只框选部分行/列时按列区间裁剪，
+ * 让复制结果仍是可直接粘回文档的 Markdown 表格，而不是制表符纯文本。
+ */
+function tableSelectionToMarkdown(
+  table: HTMLTableElement,
+  range: InstanceType<typeof window.Range>,
+  source: string
+): string | null {
+  const rows = Array.from(table.rows)
+  if (rows.length === 0) return null
+  const hit = new Set<HTMLTableRowElement>()
+  const colSet = new Set<number>()
+  let selected = 0
+  let total = 0
+  for (const row of rows) {
+    total += row.cells.length
+    Array.from(row.cells).forEach((cell, index) => {
+      if (!range.intersectsNode(cell)) return
+      hit.add(row)
+      colSet.add(index)
+      selected++
+    })
+  }
+  if (selected === 0) return null
+  if (selected >= total) return tableToMarkdown(table, source)
+  const cols: number[] = []
+  const min = Math.min(...Array.from(colSet))
+  const max = Math.max(...Array.from(colSet))
+  for (let i = min; i <= max; i++) cols.push(i)
+  const aligns = tableAligns(source)
+  const line = (cells: string[]): string => `| ${cells.join(' | ')} |`
+  const pick = (row: HTMLTableRowElement): string[] =>
+    cols.map((i) => {
+      const cell = row.cells[i]
+      return cell ? cellMarkdown(cell as HTMLTableCellElement) : ''
+    })
+  const out = [line(pick(rows[0])), line(cols.map((i) => aligns[i] ?? '---'))]
+  for (const row of rows.slice(1)) {
+    if (hit.has(row)) out.push(line(pick(row)))
+  }
+  return out.join('\n')
+}
+
+/**
+ * 表格：渲染结果里的单元格可直接编辑（Typora 式），失焦/回车/Esc 时写回 Markdown。
+ * 编辑期间不改文档，避免组件重建打断输入法组合；Ctrl/Cmd+点击回退源码态调整结构。
+ */
+class TableWidget extends WidgetType {
+  private wrap: HTMLElement | null = null
+  constructor(
+    private readonly html: string,
+    private readonly source: string,
+    private readonly from: number,
+    private readonly to: number
+  ) {
+    super()
+  }
+  eq(other: TableWidget): boolean {
+    // 位置也必须比较：文档上方有增删时旧组件的位置会失效，提交会写错地方
+    return (
+      other.html === this.html &&
+      other.source === this.source &&
+      other.from === this.from &&
+      other.to === this.to
+    )
+  }
+  ignoreEvent(event: Event): boolean {
+    return !(
+      event instanceof MouseEvent &&
+      event.type === 'mousedown' &&
+      (event.ctrlKey || event.metaKey)
+    )
+  }
+  private commit(view: EditorView): void {
+    const table = this.wrap?.querySelector('table')
+    if (!table || this.to > view.state.doc.length) return
+    // 编辑期间文档若被外部改动，位置可能已失效，禁止盲写
+    if (view.state.doc.sliceString(this.from, this.to) !== this.source) return
+    const next = tableToMarkdown(table as HTMLTableElement, this.source)
+    if (next === this.source) return
+    view.dispatch({ changes: { from: this.from, to: this.to, insert: next } })
+  }
+  toDOM(view: EditorView): HTMLElement {
+    const wrap = document.createElement('div')
+    wrap.className = 'cm-md-block cm-md-rendered markdown-body cm-md-table'
+    wrap.innerHTML = this.html
+    this.wrap = wrap
+    const table = wrap.querySelector('table') as HTMLTableElement | null
+    if (!table) return wrap
+    // 整表作为一个编辑宿主：拖选可以跨单元格连续进行（Typora 式）。
+    // 若逐单元格设为宿主，原生选区会被钳制在单个单元格内
+    table.setAttribute('contenteditable', 'plaintext-only')
+    table.spellcheck = false
+    for (const img of Array.from(wrap.querySelectorAll('img'))) {
+      const remeasure = (): void => view.requestMeasure()
+      img.addEventListener('load', remeasure, { once: true })
+      img.addEventListener('error', remeasure, { once: true })
+    }
+    // 单元格里的链接交给系统浏览器，不进入编辑
+    wrap.addEventListener('click', (event) => {
+      const anchor = (event.target as HTMLElement).closest('a')
+      if (!anchor) return
+      event.preventDefault()
+      const href = anchor.getAttribute('href')
+      if (href && /^(https?:|mailto:|tel:)/i.test(href)) window.api.openExternal(href)
+    })
+    wrap.addEventListener('focusout', (event) => {
+      const next = event.relatedTarget as Node | null
+      if (next && wrap.contains(next)) return
+      this.commit(view)
+    })
+    wrap.addEventListener('keydown', (event) => {
+      if (event.isComposing) return
+      if (event.key === 'Escape' || event.key === 'Enter') {
+        event.preventDefault()
+        ;(document.activeElement as HTMLElement | null)?.blur()
+        return
+      }
+      if ((event.ctrlKey || event.metaKey) && !event.shiftKey && event.key.toLowerCase() === 's') {
+        // 同步写回，让随后的 window 级 Ctrl+S 保存到最新内容（此处不阻断事件）
+        this.commit(view)
+        return
+      }
+      if (event.key === 'Tab') {
+        event.preventDefault()
+        const cells = Array.from(table.querySelectorAll('th, td')) as HTMLElement[]
+        // 编辑宿主是整张表，activeElement 指向 table，当前单元格要从选区取
+        const sel = window.getSelection()
+        const anchor = sel?.anchorNode
+        const anchorEl = anchor instanceof Element ? anchor : anchor?.parentElement
+        const index = cells.indexOf(anchorEl?.closest('th, td') as HTMLElement)
+        const target = cells[index + (event.shiftKey ? -1 : 1)]
+        if (!target) {
+          ;(document.activeElement as HTMLElement | null)?.blur()
+          return
+        }
+        table.focus()
+        const range = document.createRange()
+        range.selectNodeContents(target)
+        const selection = window.getSelection()
+        selection?.removeAllRanges()
+        selection?.addRange(range)
+      }
+    })
+    // 渲染表格里复制选中内容时给出 Markdown 源码，避免落入浏览器默认的制表符纯文本
+    wrap.addEventListener('copy', (event) => {
+      const sel = window.getSelection()
+      if (!sel || sel.isCollapsed || sel.rangeCount === 0) return
+      const range = sel.getRangeAt(0)
+      if (!wrap.contains(range.startContainer) || !wrap.contains(range.endContainer)) return
+      const md = tableSelectionToMarkdown(table, range, this.source)
+      if (!md) return
+      event.clipboardData?.setData('text/plain', md)
+      // 不让 CodeMirror 的复制处理器再按状态选区覆盖
+      event.stopPropagation()
+      event.preventDefault()
+    })
     return wrap
   }
 }
@@ -808,23 +1116,16 @@ function buildRenderedBlocks(
   const theme = getTheme()
   const docPath = getDocPath()
   const selection = state.selection.ranges
+  // 只在选区锚点落在块内时展开源码：点进块内（含键盘导航）才进入编辑态；
+  // 从块外拖选路过块时不展开——展开会把渲染块换成源码、高度骤变，拖拽会失控
   const revealed = (from: number, to: number): boolean =>
-    selection.some((range) => range.from <= to && range.to >= from)
-  const hidden = new Set<number>()
-
-  const hideLine = (lineNumber: number): void => {
-    const line = doc.line(lineNumber)
-    if (hidden.has(line.from)) return
-    hidden.add(line.from)
-    ranges.push(Decoration.line({ class: 'cm-md-block-hidden' }).range(line.from))
-  }
-
+    selection.some((range) => range.anchor >= from && range.anchor <= to)
+  // 整块替换而非「隐藏行 + 行尾块组件」：display:none 的隐藏行高度为 0，
+  // 选区端点一旦落在隐藏行末尾，坐标测量会拿到 1e9 哨兵，生成十几兆像素高的
+  // 选区矩形，把滚动高度撑爆（表格变空、标题错位就是这么来的）
   const addBlock = (from: number, to: number, widget: WidgetType): void => {
     if (revealed(from, to)) return
-    const first = doc.lineAt(from).number
-    const last = doc.lineAt(to).number
-    for (let n = first; n <= last; n++) hideLine(n)
-    ranges.push(Decoration.widget({ widget, block: true, side: 1 }).range(to))
+    ranges.push(Decoration.replace({ widget, block: true }).range(from, to))
   }
 
   /** 代码块编辑态：源码行保留为可编辑文本，按代码块样式呈现 */
@@ -876,6 +1177,18 @@ function buildRenderedBlocks(
           }
           const contentFrom =
             firstContent <= lastContent ? doc.line(firstContent).from : (openLine?.to ?? from)
+          // 写回时沿用原围栏与引用/缩进前缀，只替换内容行
+          const openText = openLine ? openLine.text : ''
+          const quotePrefix = openText.match(/^(?:[ \t]*>[ \t]?)+/)?.[0] ?? ''
+          const indent = openText.slice(quotePrefix.length).match(/^[ \t]*/)?.[0] ?? ''
+          const linePrefix = quotePrefix + indent
+          const closeText = closeLine ? closeLine.text : null
+          const rebuild = (next: string): string =>
+            [
+              openText,
+              ...next.split('\n').map((line) => linePrefix + line),
+              ...(closeText !== null ? [closeText] : [])
+            ].join('\n')
           addBlock(
             from,
             to,
@@ -885,7 +1198,10 @@ function buildRenderedBlocks(
               contentFrom,
               firstContent,
               lang,
-              openLine ? openLine.to : null
+              from,
+              to,
+              doc.sliceString(from, to),
+              rebuild
             )
           )
           return false
@@ -894,6 +1210,15 @@ function buildRenderedBlocks(
           addCodeSource(doc.lineAt(node.from).number, doc.lineAt(node.to).number)
           return false
         }
+        // 缩进代码块写回：沿用首行的引用前缀与缩进（4 空格或制表符）
+        const firstText = doc.lineAt(node.from).text
+        const quotePrefix = firstText.match(/^(?:[ \t]*>[ \t]?)+/)?.[0] ?? ''
+        const indent = firstText.slice(quotePrefix.length).match(/^(?: {4}|\t)/)?.[0] ?? '    '
+        const rebuild = (next: string): string =>
+          next
+            .split('\n')
+            .map((line) => (line === '' ? quotePrefix : quotePrefix + indent + line))
+            .join('\n')
         addBlock(
           from,
           to,
@@ -903,7 +1228,10 @@ function buildRenderedBlocks(
             from,
             doc.lineAt(node.from).number,
             '',
-            null
+            from,
+            to,
+            doc.sliceString(from, to),
+            rebuild
           )
         )
         return false
@@ -912,9 +1240,10 @@ function buildRenderedBlocks(
       if (name === 'Table') {
         const from = doc.lineAt(node.from).from
         const to = doc.lineAt(node.to).to
-        const html = renderFragment(doc.sliceString(from, to), docPath)
+        const source = doc.sliceString(from, to)
+        const html = renderFragment(source, docPath)
         if (html.replace(/\s+/g, '')) {
-          addBlock(from, to, new RenderedHtmlWidget(html, Math.min(from + 1, to), false))
+          addBlock(from, to, new TableWidget(html, source, from, to))
         }
         return false
       }
@@ -968,16 +1297,97 @@ export function livePreviewExtension(
   getTheme: () => LiveTheme
 ) {
   const blocks = renderedBlocksField(mode, getDocPath, getTheme)
+
   const inline = ViewPlugin.fromClass(
     class {
       decorations: DecorationSet
       private langSig: string
       private timer = 0
+      private readonly view: EditorView
+      private dragFromOutside = false
+      private dragGen = 0
 
       constructor(view: EditorView) {
+        this.view = view
         this.decorations = buildDecorations(view, mode, getDocPath())
         this.langSig = fenceLanguages(view.state.doc.toString()).join(',')
+        view.contentDOM.addEventListener('mousedown', this.onMouseDown, true)
+        document.addEventListener('mouseup', this.onMouseUp, true)
         this.schedule(view, 0)
+      }
+
+      destroy(): void {
+        this.view.contentDOM.removeEventListener('mousedown', this.onMouseDown, true)
+        document.removeEventListener('mouseup', this.onMouseUp, true)
+      }
+
+      private onMouseDown = (event: MouseEvent): void => {
+        if (event.button !== 0) return
+        this.dragGen++
+        const target = event.target
+        const el = target instanceof Element ? target : null
+        this.dragFromOutside = !el?.closest('.cm-md-block')
+      }
+
+      private onMouseUp = (): void => {
+        if (!this.dragFromOutside) return
+        this.dragFromOutside = false
+        const gen = this.dragGen
+        // 首轮等 CM 处理完 mouseup；浏览器内置的表格选区会在其后若干帧再回写一次
+        // 整块选区，再补两次同步，确保最终停在块外
+        for (const delay of [0, 120, 380]) {
+          window.setTimeout(() => {
+            if (this.dragGen !== gen || !this.view.dom.isConnected) return
+            this.settleDragSelection()
+          }, delay)
+        }
+      }
+
+      /**
+       * 从块外向下拖选跨过渲染块时，浏览器会把整块（表格/代码块）内容纳入选区：
+       * 状态选区端点在块尾时整块被复制，原生选区还会把整块刷成选中色。
+       * 这里把端点收回到块首，并把原生选区同步回状态选区（焦点在渲染块内时
+       * CM 不会自己写回 DOM），使高亮与复制都停在块外；块内文字仍可在块内单独拖选。
+       */
+      private settleDragSelection(): void {
+        const view = this.view
+        if (!view.dom.isConnected) return
+        const sel = view.state.selection.main
+        if (sel.empty) return
+        let edge: number | null = null
+        if (sel.head > sel.anchor) {
+          view.state
+            .field(blocks)
+            .between(sel.anchor, sel.head, (from, to, value) => {
+              // 只看替换块（区间非空），跳过行内零宽组件
+              if (!value.spec?.widget || to <= from) return
+              if (from <= sel.anchor || from > sel.head) return
+              if (edge === null || from < edge) edge = from
+            })
+          if (edge !== null && sel.head > edge) {
+            view.dispatch({
+              selection: EditorSelection.range(sel.anchor, edge),
+              userEvent: 'select'
+            })
+          }
+        }
+        if (edge === null) return
+        const final = view.state.selection.main
+        // 原生选区终点若贴着渲染块首，浏览器会把它当作表格/块选区再吞成整块；
+        // 退到块前一行内（edge - 1）避开边界
+        this.applyNativeSelection(final.anchor, Math.max(final.anchor, edge - 1))
+      }
+
+      private applyNativeSelection(anchor: number, head: number): void {
+        const nsel = window.getSelection()
+        if (!nsel) return
+        try {
+          const a = this.view.domAtPos(anchor)
+          const h = this.view.domAtPos(head)
+          nsel.setBaseAndExtent(a.node, a.offset, h.node, h.offset)
+        } catch {
+          // 端点无法映射到 DOM（落在组件内部）时保持原选区
+        }
       }
 
       update(update: ViewUpdate) {

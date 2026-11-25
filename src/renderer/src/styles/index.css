@@ -437,9 +437,15 @@ body[data-dragging='true'] {
 .cm-md-image-block { display: flex; justify-content: center; padding: 4px 0 12px; }
 .cm-md-image-block img { max-width: 100%; border-radius: 4px; }
 
-/* 就地渲染的块级呈现：代码块/表格/HTML 块/脚注定义隐藏源码行，换成渲染结果 */
-.cm-line.cm-md-block-hidden {
-  display: none;
+/* 就地渲染的块级呈现：代码块/表格/HTML 块/脚注定义整块替换为渲染结果 */
+/* 表格整表为编辑宿主：单元格内直接输入；不画聚焦框，靠光标指示位置（Typora 式） */
+.cm-md-table table[contenteditable] {
+  outline: none;
+}
+.cm-md-table td,
+.cm-md-table th {
+  cursor: text;
+  outline: none;
 }
 /* 代码块编辑态：围栏行隐藏，内容行以代码样式就地编辑。
    底色用半透明，避免盖住 z-index 为负的选区层 */
@@ -475,7 +481,7 @@ body[data-dragging='true'] {
 .cm-line.cm-md-codeblock-src.cm-md-codeblock-fence.cm-md-codeblock-last {
   padding-bottom: 8px;
 }
-/* 渲染态代码块左上角的语言标签（悬停显示，点击露出围栏行） */
+/* 渲染态代码块左上角的语言标签（悬停显示）；纯提示，不接收指针事件 */
 .code-lang-tag {
   position: absolute;
   top: 8px;
@@ -488,15 +494,17 @@ body[data-dragging='true'] {
   border-radius: 6px;
   background: var(--bg);
   color: var(--text-muted);
-  cursor: text;
   opacity: 0;
   transition: opacity 0.15s;
+  pointer-events: none;
 }
-.code-wrap:hover .code-lang-tag,
-.code-lang-tag:focus-visible {
+.code-wrap:hover .code-lang-tag {
   opacity: 1;
 }
+/* flow-root 让子元素外边距留在盒子内：块组件的高度须与视觉占位一致，
+   否则 CodeMirror 的高度表会比真实布局短一截，点击/框选会错位到下方的隐藏源码行 */
 .cm-md-block {
+  display: flow-root;
   padding: 2px 0 6px;
 }
 /* 复用 .markdown-body 的排版样式，但不受阅读栏宽度/内边距约束 */
@@ -509,6 +517,11 @@ body[data-dragging='true'] {
 }
 .cm-md-rendered.markdown-body pre {
   margin: 0 0 0.5em;
+}
+/* 渲染态代码块可直接编辑：不画聚焦框，靠光标指示位置（Typora 式；同时压掉 Chromium 默认焦点圈） */
+.cm-md-codeblock pre[contenteditable]:focus,
+.cm-md-codeblock pre[contenteditable]:focus-visible {
+  outline: none;
 }
 .cm-md-rendered.markdown-body table {
   margin-bottom: 0.5em;
