@@ -5,6 +5,7 @@ import { IPC } from '../shared/ipc'
 import type {
   ColorScheme,
   FileOpenResult,
+  ImageSaveMode,
   IpcErrorCode,
   IpcResult,
   PrefsState,
@@ -46,7 +47,8 @@ let prefs: PrefsState = {
   reading: { ...READING_DEFAULTS },
   theme: 'dark',
   preset: 'github',
-  viewMode: 'ir'
+  viewMode: 'ir',
+  imageSaveMode: 'doc'
 }
 
 const isDev = Boolean(process.env['ELECTRON_RENDERER_URL'])
@@ -74,6 +76,35 @@ async function uniqueAssetName(dir: string, base: string, ext: string): Promise<
       return name
     }
   }
+}
+
+/** 按偏好决定图片保存目录；ask 模式弹出目录选择（限工作区内），取消返回 null */
+async function resolveImageDir(docPath: string): Promise<string | null> {
+  const docDir = path.dirname(docPath)
+  if (prefs.imageSaveMode === 'ask') {
+    const win = BrowserWindow.getFocusedWindow() ?? mainWindow
+    const result = await dialog.showOpenDialog(win ?? mainWindow!, {
+      title: '选择图片保存位置',
+      defaultPath: docDir,
+      properties: ['openDirectory', 'createDirectory']
+    })
+    if (result.canceled || result.filePaths.length === 0) return null
+    const chosen = path.resolve(result.filePaths[0])
+    // 图片必须能被 md-asset 协议提供，否则预览无法显示
+    if (!isInsideWorkspace(chosen)) {
+      throw Object.assign(new Error('图片目录必须位于工作区内'), { code: 'EACCES' })
+    }
+    return chosen
+  }
+  if (prefs.imageSaveMode === 'assets') return path.join(docDir, 'assets')
+  const base = path.basename(docPath, path.extname(docPath))
+  return path.join(docDir, base)
+}
+
+/** 图片文件相对文档目录的 Markdown 引用路径 */
+function imageLink(docPath: string, filePath: string): string {
+  const rel = path.relative(path.dirname(docPath), filePath).split(path.sep).join('/')
+  return rel.startsWith('..') ? rel : `./${rel}`
 }
 
 const watchFactory: WatchFactory = (target, onChange) => {
@@ -147,6 +178,7 @@ function refreshMenu(): void {
     setTheme: (theme) => mainWindow?.webContents.send(IPC.menuSetTheme, theme),
     setPreset: (preset) => mainWindow?.webContents.send(IPC.menuSetPreset, preset),
     setViewMode: (mode) => mainWindow?.webContents.send(IPC.menuSetViewMode, mode),
+    setImageSaveMode: (mode) => mainWindow?.webContents.send(IPC.menuSetImageSaveMode, mode),
     prefs
   })
 }
@@ -448,12 +480,13 @@ function registerIpc(): void {
     try {
       const stat = await fs.promises.stat(srcPath)
       if (!stat.isFile()) return { ok: false, error: '不是文件' }
-      const assetsDir = path.join(path.dirname(docPath), 'assets')
-      await fs.promises.mkdir(assetsDir, { recursive: true })
+      const dir = await resolveImageDir(docPath)
+      if (!dir) return { ok: false, error: '已取消' }
+      await fs.promises.mkdir(dir, { recursive: true })
       const base = path.basename(srcPath, ext).replace(/[<>:"/\\|?*\x00-\x1f]/g, '_') || 'image'
-      const name = await uniqueAssetName(assetsDir, base, ext)
-      await fs.promises.copyFile(srcPath, path.join(assetsDir, name))
-      return { ok: true, data: `./assets/${name}` }
+      const name = await uniqueAssetName(dir, base, ext)
+      await fs.promises.copyFile(srcPath, path.join(dir, name))
+      return { ok: true, data: imageLink(docPath, path.join(dir, name)) }
     } catch (err) {
       return errorResult(err)
     }
@@ -472,12 +505,13 @@ function registerIpc(): void {
         return { ok: false, error: '文档不在工作区内' }
       }
       try {
-        const assetsDir = path.join(path.dirname(docPath), 'assets')
-        await fs.promises.mkdir(assetsDir, { recursive: true })
+        const dir = await resolveImageDir(docPath)
+        if (!dir) return { ok: false, error: '已取消' }
+        await fs.promises.mkdir(dir, { recursive: true })
         const base = `pasted-${Date.now()}`
-        const name = await uniqueAssetName(assetsDir, base, ext)
-        await fs.promises.writeFile(path.join(assetsDir, name), data)
-        return { ok: true, data: `./assets/${name}` }
+        const name = await uniqueAssetName(dir, base, ext)
+        await fs.promises.writeFile(path.join(dir, name), data)
+        return { ok: true, data: imageLink(docPath, path.join(dir, name)) }
       } catch (err) {
         return errorResult(err)
       }
@@ -493,11 +527,14 @@ function registerIpc(): void {
     const data = (typeof value === 'object' && value !== null ? value : {}) as Partial<PrefsState>
     const viewMode: ViewMode =
       data.viewMode === 'wysiwyg' || data.viewMode === 'split' ? data.viewMode : 'ir'
+    const imageSaveMode: ImageSaveMode =
+      data.imageSaveMode === 'assets' || data.imageSaveMode === 'ask' ? data.imageSaveMode : 'doc'
     prefs = {
       reading: normalizeReading(data.reading),
       theme: data.theme === 'light' ? 'light' : 'dark',
       preset: normalizePreset(data.preset),
-      viewMode
+      viewMode,
+      imageSaveMode
     }
     refreshMenu()
   })

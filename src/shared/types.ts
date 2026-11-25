@@ -16,10 +16,14 @@ export interface PrefsState {
   theme: ColorScheme
   preset: ThemePreset
   viewMode: ViewMode
+  imageSaveMode: ImageSaveMode
 }
 
 /** ir = 即时渲染（当前行显源码）、wysiwyg = 标记恒隐藏、split = 源码+预览分屏 */
 export type ViewMode = 'ir' | 'wysiwyg' | 'split'
+
+/** doc = 文档同名文件夹（note.md → note/）、assets = ./assets、ask = 每次询问 */
+export type ImageSaveMode = 'doc' | 'assets' | 'ask'
 
 export interface SaveMeta {
   encoding: string
@@ -90,6 +94,7 @@ export interface DesktopAPI {
   setDirty(dirty: boolean): void
   onMenuSaveFile(cb: () => void): () => void
   onMenuSetViewMode(cb: (mode: ViewMode) => void): () => void
+  onMenuSetImageSaveMode(cb: (mode: ImageSaveMode) => void): () => void
   confirmDiscard(): Promise<'save' | 'discard' | 'cancel'>
   confirmOverwrite(): Promise<boolean>
   onRequestSaveAndClose(cb: () => void): () => void

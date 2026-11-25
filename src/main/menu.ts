@@ -1,5 +1,11 @@
 import { Menu } from 'electron'
-import type { ColorScheme, PrefsState, ReadingSettings, ViewMode } from '../shared/types'
+import type {
+  ColorScheme,
+  ImageSaveMode,
+  PrefsState,
+  ReadingSettings,
+  ViewMode
+} from '../shared/types'
 import {
   CONTENT_WIDTH_OPTIONS,
   FONT_FAMILY_OPTIONS,
@@ -16,6 +22,7 @@ interface MenuHandlers {
   setTheme(theme: ColorScheme): void
   setPreset(preset: ThemePreset): void
   setViewMode(mode: ViewMode): void
+  setImageSaveMode(mode: ImageSaveMode): void
   prefs: PrefsState
 }
 
@@ -25,9 +32,15 @@ const VIEW_MODE_OPTIONS: { value: ViewMode; label: string; accelerator: string }
   { value: 'split', label: '分屏预览', accelerator: 'CmdOrCtrl+3' }
 ]
 
+const IMAGE_SAVE_OPTIONS: { value: ImageSaveMode; label: string }[] = [
+  { value: 'doc', label: '文档同名文件夹（note）' },
+  { value: 'assets', label: 'assets 文件夹' },
+  { value: 'ask', label: '每次询问' }
+]
+
 export function buildMenu(handlers: MenuHandlers): void {
   const isDev = Boolean(process.env['ELECTRON_RENDERER_URL'])
-  const { reading, theme, preset, viewMode } = handlers.prefs
+  const { reading, theme, preset, viewMode, imageSaveMode } = handlers.prefs
 
   const template: Electron.MenuItemConstructorOptions[] = [
     {
@@ -54,7 +67,17 @@ export function buildMenu(handlers: MenuHandlers): void {
         { role: 'cut', label: '剪切' },
         { role: 'copy', label: '复制' },
         { role: 'paste', label: '粘贴' },
-        { role: 'selectAll', label: '全选' }
+        { role: 'selectAll', label: '全选' },
+        { type: 'separator' },
+        {
+          label: '图片保存位置',
+          submenu: IMAGE_SAVE_OPTIONS.map((option) => ({
+            label: option.label,
+            type: 'radio',
+            checked: imageSaveMode === option.value,
+            click: () => handlers.setImageSaveMode(option.value)
+          }))
+        }
       ]
     },
     {

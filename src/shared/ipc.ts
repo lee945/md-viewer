@@ -22,6 +22,7 @@ export const IPC = {
   menuSaveFile: 'menu:save-file',
   setDirty: 'window:set-dirty',
   menuSetViewMode: 'menu:set-view-mode',
+  menuSetImageSaveMode: 'menu:set-image-save-mode',
   confirmDiscard: 'dialog:confirm-discard',
   confirmOverwrite: 'dialog:confirm-overwrite',
   requestSaveAndClose: 'app:request-save-close',

@@ -6,6 +6,7 @@ import type {
   DirEntry,
   FileInfo,
   FileOpenResult,
+  ImageSaveMode,
   IpcResult,
   ReadingSettings,
   SaveMeta,
@@ -67,6 +68,7 @@ const api: DesktopAPI = {
   },
   onMenuSaveFile: (cb) => subscribe(IPC.menuSaveFile, () => cb()),
   onMenuSetViewMode: (cb) => subscribe<ViewMode>(IPC.menuSetViewMode, cb),
+  onMenuSetImageSaveMode: (cb) => subscribe<ImageSaveMode>(IPC.menuSetImageSaveMode, cb),
   confirmDiscard: () =>
     ipcRenderer.invoke(IPC.confirmDiscard) as Promise<'save' | 'discard' | 'cancel'>,
   confirmOverwrite: () => ipcRenderer.invoke(IPC.confirmOverwrite) as Promise<boolean>,

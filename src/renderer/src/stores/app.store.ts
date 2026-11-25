@@ -1,5 +1,12 @@
 import { create } from 'zustand'
-import type { ColorScheme, FileInfo, FileOpenResult, RecentEntry, ViewMode } from '@shared/types'
+import type {
+  ColorScheme,
+  FileInfo,
+  FileOpenResult,
+  ImageSaveMode,
+  RecentEntry,
+  ViewMode
+} from '@shared/types'
 import { isPathInside } from '@shared/paths'
 import { normalizePreset, type ThemePreset } from '@shared/themes'
 import {
@@ -29,6 +36,7 @@ interface AppState {
   theme: ColorScheme
   preset: ThemePreset
   viewMode: ViewMode
+  imageSaveMode: ImageSaveMode
   dirty: boolean
   savedContent: string | null
   saving: boolean
@@ -48,6 +56,7 @@ interface AppState {
   setTheme(theme: ColorScheme): void
   setPreset(preset: ThemePreset): void
   setViewMode(mode: ViewMode): void
+  setImageSaveMode(mode: ImageSaveMode): void
   setContent(content: string): void
   save(content: string): Promise<boolean>
   reloadFromDisk(): Promise<void>
@@ -64,6 +73,7 @@ const THEME_KEY = 'mdv.theme'
 const PRESET_KEY = 'mdv.theme-preset'
 const SIDEBAR_TAB_KEY = 'mdv.sidebarTab'
 const VIEW_MODE_KEY = 'mdv.viewMode'
+const IMAGE_SAVE_KEY = 'mdv.image-save'
 
 let queue: Promise<void> = Promise.resolve()
 
@@ -126,6 +136,12 @@ function initialSidebarTab(): SidebarTab {
   return localStorage.getItem(SIDEBAR_TAB_KEY) === 'files' ? 'files' : 'outline'
 }
 
+function initialImageSaveMode(): ImageSaveMode {
+  const saved = localStorage.getItem(IMAGE_SAVE_KEY)
+  if (saved === 'assets' || saved === 'ask') return saved
+  return 'doc'
+}
+
 function applyFile(get: GetState, set: SetState, data: FileOpenResult): void {
   const recentFiles = pushRecent(get().recentFiles, { path: data.file.path, time: Date.now() })
   saveRecentFiles(recentFiles)
@@ -169,6 +185,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   theme: initialTheme(),
   preset: initialPreset(),
   viewMode: initialViewMode(),
+  imageSaveMode: initialImageSaveMode(),
   dirty: false,
   savedContent: null,
   saving: false,
@@ -305,6 +322,11 @@ export const useAppStore = create<AppState>((set, get) => ({
   setViewMode(mode) {
     localStorage.setItem(VIEW_MODE_KEY, mode)
     set({ viewMode: mode })
+  },
+
+  setImageSaveMode(mode) {
+    localStorage.setItem(IMAGE_SAVE_KEY, mode)
+    set({ imageSaveMode: mode })
   },
 
   setContent(content) {

@@ -17,6 +17,7 @@ export default function App() {
   const theme = useAppStore((s) => s.theme)
   const preset = useAppStore((s) => s.preset)
   const viewMode = useAppStore((s) => s.viewMode)
+  const imageSaveMode = useAppStore((s) => s.imageSaveMode)
   const dirty = useAppStore((s) => s.dirty)
   const error = useAppStore((s) => s.error)
   const clearError = useAppStore((s) => s.clearError)
@@ -64,8 +65,8 @@ export default function App() {
   }, [theme, preset])
 
   useEffect(() => {
-    window.api.syncPrefs({ reading, theme, preset, viewMode })
-  }, [reading, theme, preset, viewMode])
+    window.api.syncPrefs({ reading, theme, preset, viewMode, imageSaveMode })
+  }, [reading, theme, preset, viewMode, imageSaveMode])
 
   useEffect(() => {
     window.api.setDirty(dirty)
@@ -92,6 +93,9 @@ export default function App() {
     const offMode = window.api.onMenuSetViewMode((mode) => {
       useAppStore.getState().setViewMode(mode)
     })
+    const offImageSave = window.api.onMenuSetImageSaveMode((mode) => {
+      useAppStore.getState().setImageSaveMode(mode)
+    })
     const offSaveClose = window.api.onRequestSaveAndClose(() => {
       void saveNow().then((ok) => {
         if (ok) window.api.closeConfirmed()
@@ -103,6 +107,7 @@ export default function App() {
       offPreset()
       offSave()
       offMode()
+      offImageSave()
       offSaveClose()
     }
   }, [saveNow])
